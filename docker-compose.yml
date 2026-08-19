@@ -1,0 +1,24 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: pii-test-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: mydb_two
+    ports:
+      - "5432:5432"
+    volumes:
+      - pii-test-pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    container_name: pii-test-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - pii-test-redisdata:/data
+
+volumes:
+  pii-test-pgdata:
+  pii-test-redisdata:
