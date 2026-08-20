@@ -1,9 +1,9 @@
 package events
 
 import (
-	"MTL_Scheduler_PII_Test/internals/cache"
 	"MTL_Scheduler_PII_Test/internals/database"
 	"MTL_Scheduler_PII_Test/internals/models"
+	"context"
 	"fmt"
 	"time"
 
@@ -12,9 +12,7 @@ import (
 
 // RFC-005 §7 Projections — Run Projection: "current execution state, latest attempt, attempt count, timestamps, ... PII summary, alert summary."
 // Only the Run Projection is implemented; Worker/Queue/Schedule/Component Health projections are commented out in models.RunProjection pending their prerequisite RFCs (004 heartbeats, 003 queue sampling, 002 schedule model).
-func UpdateProjection(jobId string, eventType string, occurredAt time.Time) {
-
-	ctx := cache.Ctx
+func UpdateProjection(ctx context.Context, jobId string, eventType string, occurredAt time.Time) {
 
 	var field string
 	var value any

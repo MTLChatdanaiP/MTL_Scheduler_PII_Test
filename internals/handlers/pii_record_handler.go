@@ -18,7 +18,7 @@ func GetPIIByJobId(c *gin.Context) {
 
 	var results []models.PIIRecord
 
-	database.DB.Where("job_id = ?", JobId).Find(&results)
+	database.DB.WithContext(c.Request.Context()).Where("job_id = ?", JobId).Find(&results)
 
 	c.JSON(http.StatusOK, results)
 }

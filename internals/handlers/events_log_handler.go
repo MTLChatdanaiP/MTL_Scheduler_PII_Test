@@ -18,7 +18,7 @@ func GetEventByJobId(c *gin.Context) {
 
 	var results []models.EventEnvelope
 
-	database.DB.Where("job_id = ?", JobId).Find(&results)
+	database.DB.WithContext(c.Request.Context()).Where("job_id = ?", JobId).Find(&results)
 
 	c.JSON(http.StatusOK, results)
 }
@@ -31,7 +31,7 @@ func GetRunProjectionByJobId(c *gin.Context) {
 
 	var results []models.RunProjection
 
-	database.DB.Where("job_id = ?", JobId).Find(&results)
+	database.DB.WithContext(c.Request.Context()).Where("job_id = ?", JobId).Find(&results)
 
 	c.JSON(http.StatusOK, results)
 }

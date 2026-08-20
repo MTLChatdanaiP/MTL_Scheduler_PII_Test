@@ -17,6 +17,7 @@ import (
 	"MTL_Scheduler_PII_Test/internals/database"
 	"MTL_Scheduler_PII_Test/internals/models"
 	"MTL_Scheduler_PII_Test/internals/routes"
+	"MTL_Scheduler_PII_Test/internals/shutdown"
 	"MTL_Scheduler_PII_Test/internals/worker"
 )
 
@@ -69,12 +70,38 @@ func main() {
 	fmt.Println("Running... press Ctrl+C to stop")
 	<-ctx.Done()
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	shutdown.Run(context.Background(), []shutdown.Phase{
+		{
+			Name:    "http-server",
+			Timeout: 10 * time.Second,
+			Run: func(ctx context.Context) error {
+				// RFC-004 §10 Graceful Shutdown: stop accepting new HTTP
+				// requests first, so no new tasks enter the system while
+				// the rest of shutdown proceeds.
+				return srv.Shutdown(ctx)
+			},
+		},
+		{
+			Name:    "background-workers",
+			Timeout: 40 * time.Second, // comfortably longer than ProcessTask's 30s sleep
+			Run: func(ctx context.Context) error {
+				// Worker/reclaimer/scheduler were already told to stop via
+				// the earlier ctx.Done() — this phase just waits (bounded)
+				// for them to actually finish any in-flight work.
+				return shutdown.WaitGroup(ctx, &wg)
+			},
+		},
+		{
+			Name:    "infra-connections",
+			Timeout: 5 * time.Second,
+			Run: func(ctx context.Context) error {
+				if sqlDB, err := database.DB.DB(); err == nil {
+					sqlDB.Close()
+				}
+				return redisdb.Client.Close()
+			},
+		},
+	})
 
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("shutdown error: %v", err)
-	}
-	wg.Wait()
-	fmt.Println("Shutdown signal received, exiting")
+	fmt.Println("Shutdown complete, exiting")
 }

@@ -30,6 +30,8 @@ const (
 func CreateTask(c *gin.Context) {
 	var task models.Task
 
+	ctx := c.Request.Context()
+
 	if err := c.ShouldBindJSON(&task); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": err.Error(),
@@ -51,7 +53,7 @@ func CreateTask(c *gin.Context) {
 
 		// RFC-006 §7 Scan Model — Policy Evaluation stage, REDACT branch: finding is persisted separately (Claim Check) before the payload is rewritten
 		record := models.PIIRecord{JobId: task.JobId, Type: string(value.Type), Value: value.Match, Index: temp[value.Type], Source: "JOB_PAYLOAD", Confidence: 1.0}
-		database.DB.Create(&record)
+		database.DB.WithContext(ctx).Create(&record)
 		fmt.Println(record)
 
 		// RFC-006 §14 PII-Safe Logging: payload is rewritten so no downstream system (Redis, worker logs, monitoring) ever sees the raw value
@@ -67,8 +69,8 @@ func CreateTask(c *gin.Context) {
 	}
 
 	// RFC-000 §5.3 Domain Events Are Facts: run.created-equivalent event
-	database.DB.Create(&task)
-	events.LogEvent(task.JobId, "task.created", "api")
+	database.DB.WithContext(c.Request.Context()).Create(&task)
+	events.LogEvent(ctx, task.JobId, "task.created", "api")
 
 	c.JSON(http.StatusCreated, task)
 }
@@ -78,7 +80,7 @@ func GetTask(c *gin.Context) {
 
 	var Tasks []models.Task
 
-	database.DB.Find(&Tasks)
+	database.DB.WithContext(c.Request.Context()).Find(&Tasks)
 
 	c.JSON(http.StatusOK, Tasks)
 }

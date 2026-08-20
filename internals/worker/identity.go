@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"os"
 	"time"
 
@@ -12,7 +13,7 @@ import (
 
 // RFC-004 §5 Worker Registration: "On startup, a worker announces: identity, version, supported job types,
 // queues, concurrency, start time." Subset implemented: identity, hostname, start time
-func CreateWorker(workerId string) models.Worker {
+func CreateWorker(ctx context.Context, workerId string) models.Worker {
 	hostname, err := os.Hostname()
 	if err != nil {
 		hostname = "idk insert error messages?"
@@ -20,7 +21,7 @@ func CreateWorker(workerId string) models.Worker {
 
 	worker := models.Worker{WorkerId: workerId, InstanceId: ulid.Make().String(), Hostname: hostname, StartedAt: time.Now()}
 
-	database.DB.Create(&worker)
+	database.DB.WithContext(ctx).Create(&worker)
 	RegisterWorkerCounter(workerId)
 	return worker
 }

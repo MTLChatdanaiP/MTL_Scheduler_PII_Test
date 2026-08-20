@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"MTL_Scheduler_PII_Test/internals/cache"
@@ -22,10 +23,10 @@ const (
 // RFC-003 §6 Delivery Lifecycle, abnormal branch: CLAIMED -> worker disappears -> pending/reclaim candidate -> REDELIVERED
 // RFC-004 §14 Failure Semantics: "Process crashes... Observed facts may instead be: last execution heartbeat = old, worker heartbeat = missing, Redis pending entry = still present." XAutoClaim is how this project detects that condition
 func StartReclaimer(ctx context.Context, reclaimer_id string) {
-	bg_ctx := context.Background()
+
 	rdb := cache.Client
 
-	workerStruct := CreateWorker(reclaimer_id)
+	workerStruct := CreateWorker(ctx, reclaimer_id)
 	workerInstId := workerStruct.InstanceId
 	fmt.Println(workerInstId)
 
@@ -35,7 +36,7 @@ func StartReclaimer(ctx context.Context, reclaimer_id string) {
 			return
 		default:
 		}
-		messages, _, err := rdb.XAutoClaim(bg_ctx, &redis.XAutoClaimArgs{
+		messages, _, err := rdb.XAutoClaim(ctx, &redis.XAutoClaimArgs{
 			Stream:   cache.TaskStream,
 			Group:    WorkerGroupA,
 			Consumer: reclaimer_id,
@@ -55,17 +56,17 @@ func StartReclaimer(ctx context.Context, reclaimer_id string) {
 				return
 			default:
 			}
-			JobId, ok := msg.Values["task_id"].(string)
+			JobId, ok := msg.Values["job_id"].(string)
 			if !ok {
 				fmt.Println("Error parsing string (RECLAIMER EVENT):", ok)
 				continue
 			}
 			// RFC-005 §11 Lost Detection: this event is the durable evidence of a recovered/possibly-lost attempt, logged before reprocessing begins so detection time is captured accurately
-			events.LogEvent(JobId, "task.recovery_started", "reclaimer")
+			events.LogEvent(ctx, JobId, "task.recovery_started", "reclaimer")
 
 			// Reuses the same handling path as the primary consumer (ReadStream/ProcessStream in worker.go) — RFC-004 does not distinguish reclaim processing from normal processing, only how the message was acquired
-			ProcessStream(reclaimer_id, cache.TaskStream, WorkerGroupA, msg)
-			fmt.Println("Results received (UNACK CLAIMED): ", msg)
+			ProcessStream(ctx, reclaimer_id, cache.TaskStream, WorkerGroupA, msg)
+			slog.Info("task reclaimed", "reclaimer_id", reclaimer_id, "job_id", JobId)
 		}
 
 		time.Sleep(reclaimInterval)

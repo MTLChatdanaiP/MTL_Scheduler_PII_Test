@@ -16,7 +16,7 @@ const (
 	HeartbeatInterval = 10 * time.Second
 )
 
-func StartHeartbeat(workerId string, instanceId string, ctx context.Context) {
+func StartHeartbeat(ctx context.Context, workerId string, instanceId string) {
 	for {
 		select { // RFC-004 §10 Graceful Shutdown: heartbeat goroutine now shuts down alongside
 		// the others rather than being killed abruptly when main() returns
@@ -34,7 +34,7 @@ func StartHeartbeat(workerId string, instanceId string, ctx context.Context) {
 		counter := value.(*atomic.Int64)
 
 		WorkerHeartbeat := models.WorkerHeartbeat{WorkerId: workerId, InstanceId: instanceId, OccurredAt: time.Now(), RunningAttempts: int(counter.Load())}
-		err := database.DB.Create(&WorkerHeartbeat).Error
+		err := database.DB.WithContext(ctx).Create(&WorkerHeartbeat).Error
 		if err != nil {
 			fmt.Println("FAILED TO WRITE WORKER HEARTBEAT: ", err)
 
