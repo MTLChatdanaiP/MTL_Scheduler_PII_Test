@@ -10,6 +10,8 @@ import (
 	"MTL_Scheduler_PII_Test/internals/events"
 	"MTL_Scheduler_PII_Test/internals/models"
 
+	"github.com/oklog/ulid/v2"
+
 	"log/slog"
 	"sync/atomic"
 
@@ -30,6 +32,8 @@ const WorkerGroupA = "WorkerG_A"
 // RFC-004 §9 Capacity: "active_attempts" — global total across all workers
 var activeAttempts int64
 
+// (RFC-001 §14's list: APPLICATION_ERROR, INVALID_INPUT, DEPENDENCY_ERROR,
+// TIMEOUT, WORKER_FAILURE, INFRASTRUCTURE_ERROR, UNKNOWN)
 func runHandler(ctx context.Context, task models.Task) ExecutionOutcome {
 	switch task.TaskType {
 
@@ -56,10 +60,46 @@ func ProcessTask(ctx context.Context, JobId string, workerId string) {
 	db := database.DB
 	results := database.DB.WithContext(ctx).Where("job_id = ?", JobId).First(&task)
 
+	// RFC-003 §9 At-Least-Once Delivery / RFC-004 §12 Duplicate Execution:
+	// idempotency guard — an unfinished attempt already existing for this
+	// JobId means this is a duplicate delivery, not new work.
 	if results.Error != nil {
 		fmt.Println("Task not found:", JobId)
 		return
 	}
+
+	// RFC-001 §8 Invariant 12: "Terminal run states must not silently
+	// transition back to running." Guards against a stray/duplicate delivery
+	// reprocessing a task that already reached a terminal state.
+	if task.Status == "Completed" || task.Status == "Failed" {
+		slog.Warn("ignoring delivery for already-terminal task", "job_id", JobId, "status", task.Status)
+		return
+	}
+
+	var existingAttempt models.Attempt
+
+	results = database.DB.WithContext(ctx).
+		Where("job_id = ? AND status IN ?", JobId, []string{"Claimed", "Started"}).
+		First(&existingAttempt)
+
+	if results.Error == nil {
+		slog.Warn("attempt.duplicate_detected", "job_id", JobId)
+		return
+	}
+
+	var count int64
+	database.DB.WithContext(ctx).Model(&models.Attempt{}).Where("job_id = ?", JobId).Count(&count)
+
+	// RFC-001 §9 Commands: CreateAttempt + MarkAttemptClaimed (attempt starts at Status: "Claimed")
+	attempt := models.Attempt{
+		AttemptId:     ulid.Make().String(),
+		JobId:         JobId,
+		WorkerId:      workerId,
+		Status:        "Claimed",
+		AttemptNumber: int(count) + 1,
+		ClaimedAt:     time.Now(),
+	}
+	database.DB.WithContext(ctx).Create(&attempt)
 
 	atomic.AddInt64(&activeAttempts, 1)
 	AddWorkerCounter(workerId, 1)
@@ -69,27 +109,93 @@ func ProcessTask(ctx context.Context, JobId string, workerId string) {
 	db.WithContext(ctx).Save(&task)
 	// RFC-000 §5.3: attempt.started-equivalent event
 	events.LogEvent(ctx, task.JobId, "task.started", "worker")
+
+	// RFC-001 §9 Commands: MarkAttemptStarted
+	attempt.Status = "Started"
+	attempt.StartedAt = time.Now()
+	database.DB.WithContext(ctx).Save(&attempt)
 	//change note status from "Pending" to "Running"
 	slog.Info("task started", "worker_id", workerId, "job_id", JobId)
 
 	outcome := runHandler(ctx, task) //process the task if tasktype allows it
 
 	switch outcome {
+
+	// RFC-001 §8 Invariant 11: "A run cannot be SUCCEEDED without at least one
+	// succeeded attempt." Re-fetches from the DB rather than trusting the
+	// in-memory struct, so a silent persistence failure can't produce a false
+	// Completed status.
+	// RFC-001 §9 Commands: MarkAttemptSucceeded + MarkRunSucceeded
 	case Success:
+		attempt.Status = "Succeeded"
+		attempt.FinishedAt = time.Now()
+		db.WithContext(ctx).Save(&attempt)
+
+		// RFC-001 §8 Invariant 11: only mark the run SUCCEEDED after confirming
+		// the attempt's success was actually persisted — re-fetch and check
+		// rather than assuming the in-memory struct matches the DB
+		var confirmed models.Attempt
+		if err := database.DB.WithContext(ctx).First(&confirmed, "attempt_id = ?", attempt.AttemptId).Error; err != nil || confirmed.Status != "Succeeded" {
+			slog.Error("attempt succeeded but failed to persist — refusing to mark task Completed", "job_id", JobId)
+			return
+		}
+
 		task.Status = "Completed"
 		task.FinishedAt = time.Now()
 		db.WithContext(ctx).Save(&task)
+
 		// RFC-000 §5.3: attempt.succeeded-equivalent event
 		events.LogEvent(ctx, task.JobId, "task.completed", "worker")
+	// RFC-001 §9 Commands: ScheduleRetryRun
 	case RetryableFailure:
-		task.Status = "Pending"
-		task.TaskType = "Default" //allow retry, debug only, remove later
-		task.RunAt = time.Now().Add(10 * time.Second)
+		// RFC-001 §8 Invariant 13: a repeated retry-scheduling command must
+		// reuse the already-created child, not spawn a sibling
+		var existingChild models.Task
+		if err := database.DB.WithContext(ctx).Where("parent_run_id = ?", task.JobId).First(&existingChild).Error; err == nil {
+			slog.Warn("retry child already exists for this run, skipping duplicate creation", "job_id", task.JobId, "existing_child", existingChild.JobId)
+			return
+		}
+
+		// the FAILED run stays terminal — RFC-001 §5: "A failed parent run
+		// remains terminal after its retry child is created"
+		task.Status = "Failed"
+		task.FinishedAt = time.Now()
 		db.WithContext(ctx).Save(&task)
+
+		attempt.Status = "Abandoned"
+		attempt.FinishedAt = time.Now()
+		database.DB.WithContext(ctx).Save(&attempt)
+
 		events.LogEvent(ctx, task.JobId, "task.retry_scheduled", "worker")
+
+		// RFC-001 §7 Retry Lineage: a retry creates a NEW run — new JobId, same
+		// execution_chain_id, parent_run_id set to the failed run. The failed
+		// parent stays Failed permanently (RFC-001 §5: "A failed parent run
+		// remains terminal after its retry child is created").
+		retryTask := models.Task{
+			JobId:            ulid.Make().String(),
+			TaskName:         task.TaskName,
+			TaskType:         "Default", // reset from "fail_retryable" so it doesn't loop forever
+			Payload:          task.Payload,
+			Status:           "Pending",
+			RunAt:            time.Now().Add(10 * time.Second),
+			ExecutionChainId: task.ExecutionChainId, // SAME chain as the parent
+			ParentRunId:      task.JobId,            // points back to the failed run
+			RetryIndex:       task.RetryIndex + 1,
+		}
+		database.DB.WithContext(ctx).Create(&retryTask)
+
+		events.LogEvent(ctx, retryTask.JobId, "task.created", "worker")
+	// RFC-001 §9 Commands: MarkAttemptFailed + MarkRunFailed
 	case NonRetryableFailure:
 		task.Status = "Failed"
 		db.WithContext(ctx).Save(&task)
+
+		attempt.Status = "Failed"
+		attempt.FinishedAt = time.Now()
+		attempt.FailureCategory = "APPLICATION_ERROR"
+		db.WithContext(ctx).Save(&attempt)
+
 		events.LogEvent(ctx, task.JobId, "task.failed", "worker")
 	}
 
@@ -116,6 +222,9 @@ func ReadStream(ctx context.Context, Consumer string, StreamText string, Group s
 			return nil
 		}
 		fmt.Printf("[%s] XReadGroup error: %v\n", Consumer, err)
+		if cache.IsUnavailable(err) {
+			events.LogEvent(ctx, "system", "redis.unavailable", "worker")
+		}
 		time.Sleep(1 * time.Second)
 		return nil
 	}
@@ -150,10 +259,15 @@ func ProcessStream(ctx context.Context, Consumer string, StreamText string, Grou
 	// RFC-003 §8 Acknowledgement Semantics: ack happens only after ProcessTask has durably recorded a terminal state, not before
 	if err := rdb.XAck(workCtx, StreamText, Group, msg.ID).Err(); err != nil {
 		slog.Error("xack failed", "worker_id", Consumer, "job_id", taskId, "error", err)
+		if cache.IsUnavailable(err) {
+			events.LogEvent(ctx, "system", "redis.unavailable", "worker")
+		}
 	} else {
 		slog.Info("acked", "worker_id", Consumer, "job_id", taskId)
 	}
 }
+
+const MaxConcurrency = 1 // single-threaded worker: one message read + fully processed before the next
 
 // RFC-004 §5 Worker Registration / §4 Worker Identity: worker_id — no separate registration record, heartbeat, or capacity reporting implemented yet
 // RFC-004 §6 Worker Heartbeat: conceptual payload "worker_id, occurred_at, running_attempts, capacity, version" — capacity/version deferred (see models.WorkerHeartbeat)
@@ -177,6 +291,9 @@ func SetupWorker(ctx context.Context, worker_id string) {
 	err := rdb.XGroupCreateMkStream(ctx, TaskStream, group, "$").Err()
 	if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
 		fmt.Printf("[%s] XGroupCreate error: %v\n", worker_id, err)
+		if cache.IsUnavailable(err) {
+			events.LogEvent(ctx, "system", "redis.unavailable", "worker")
+		}
 	}
 
 	for {
@@ -195,3 +312,7 @@ func SetupWorker(ctx context.Context, worker_id string) {
 		}
 	}
 }
+
+// RFC-001 §9 Commands: CreateManualRetryRun and CancelRun are not implemented —
+// this project has no operator-triggered retry/cancel path, only automatic
+// retry via RetryableFailure. Documented as a known gap.

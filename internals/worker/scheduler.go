@@ -32,6 +32,7 @@ func StartScheduler(ctx context.Context) {
 		if result.Error == nil {
 			for _, task := range tasks {
 				// RFC-001 §5 Run State Model: QUEUED — separate from RUNNING, which the worker sets independently in ProcessTask
+				// RFC-001 §9 Commands: MarkRunQueued
 				task.Status = "Queued"
 				database.DB.WithContext(ctx).Save(&task)
 				// RFC-000 §5.3 Domain Events Are Facts: run.queued-equivalent event, Producer="scheduler" identifies which component emitted it (RFC-005 §5 envelope field)

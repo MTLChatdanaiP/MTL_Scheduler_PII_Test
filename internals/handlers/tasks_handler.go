@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/oklog/ulid/v2"
+	"gorm.io/gorm/clause"
 
 	"MTL_Scheduler_PII_Test/internals/database"
 	"MTL_Scheduler_PII_Test/internals/events"
@@ -27,7 +28,7 @@ const (
 
 // PRD §10.1 Job Submission / §10.2 Immediate Jobs / §10.3 Scheduled Jobs — handles both immediate and scheduled tasks depending on whether RunAt is provided
 // RFC-001 §4 Domain Model: this is where a JobRun-equivalent (Task) is created
-func CreateTask(c *gin.Context) {
+func CreateTask(c *gin.Context) { // RFC-001 §9 Commands: CreateInitialRun
 	var task models.Task
 
 	ctx := c.Request.Context()
@@ -40,6 +41,24 @@ func CreateTask(c *gin.Context) {
 	}
 	// PRD §9 Job Identity Requirements: stable, sortable identifier generated at creation time, before the row is persisted
 	task.JobId = ulid.Make().String()
+	task.ExecutionChainId = task.JobId
+
+	var exeChain = models.ExecutionChain{
+		ExecutionChainId: task.ExecutionChainId,
+	}
+
+	err := database.DB.WithContext(ctx).
+		Clauses(clause.OnConflict{
+			Columns: []clause.Column{
+				{Name: "execution_chain_id"},
+			},
+			DoNothing: true,
+		}).
+		Create(&exeChain).Error
+
+	if err != nil {
+		fmt.Println("FAILED TO UPSERT EXECUTION CHAIN: ", err)
+	}
 
 	temp := make(map[pii.PIIType]int)
 

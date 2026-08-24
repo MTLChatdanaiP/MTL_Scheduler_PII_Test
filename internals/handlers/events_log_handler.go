@@ -35,3 +35,117 @@ func GetRunProjectionByJobId(c *gin.Context) {
 
 	c.JSON(http.StatusOK, results)
 }
+
+func GetRunMetrics(c *gin.Context) {
+
+	JobId := c.Param("job_id")
+
+	fmt.Println("[Database] Fetching Metrics related to JodId")
+
+	var task models.Task
+
+	results := database.DB.WithContext(c.Request.Context()).Where("job_id = ?", JobId).First(&task)
+
+	if results.Error != nil {
+		fmt.Println("Task not found:", JobId)
+		return
+	}
+
+	if task.FinishedAt.IsZero() {
+		return
+	}
+
+	var chainTasks []models.Task
+
+	chain_err := database.DB.WithContext(c.Request.Context()).
+		Where("execution_chain_id = ?", task.ExecutionChainId).
+		Order("retry_index ASC").
+		Find(&chainTasks).Error
+	if chain_err != nil {
+		return
+	}
+
+	var RunProj models.RunProjection
+	runproj_err := database.DB.WithContext(c.Request.Context()).Where("job_id = ?", JobId).Last(&RunProj).Error
+	if runproj_err != nil {
+		return
+	}
+
+	var Attempt models.Attempt
+	attempt_err := database.DB.WithContext(c.Request.Context()).Where("job_id = ?", JobId).Last(&Attempt).Error
+	if attempt_err != nil {
+		return
+	}
+
+	queueLatency := RunProj.QueuedAt.Sub(task.CreatedAt)
+	executionDuration := task.FinishedAt.Sub(Attempt.StartedAt)
+	runDuration := task.FinishedAt.Sub(task.CreatedAt)
+
+	retryCount := len(chainTasks) - 1
+	chainTotalDuration := chainTasks[len(chainTasks)-1].FinishedAt.Sub(chainTasks[0].CreatedAt)
+
+	c.JSON(http.StatusOK, gin.H{
+		"job_id":               task.JobId,
+		"execution_chain_id":   task.ExecutionChainId,
+		"retry_index":          task.RetryIndex,
+		"queue_latency":        queueLatency,
+		"execution_duration":   executionDuration,
+		"run_duration":         runDuration,
+		"retry_count":          retryCount,
+		"chain_total_duration": chainTotalDuration,
+	})
+}
+
+func GetRunChain(c *gin.Context) {
+	JobId := c.Param("job_id")
+	ctx := c.Request.Context()
+
+	var task models.Task
+
+	task_err := database.DB.WithContext(ctx).Where("job_id = ?", JobId).First(&task).Error
+	if task_err != nil {
+		fmt.Println("Task not found:", JobId)
+		return
+	}
+
+	var chainTasks []models.Task
+
+	chain_err := database.DB.WithContext(ctx).
+		Where("execution_chain_id = ?", task.ExecutionChainId).
+		Order("retry_index ASC").
+		Find(&chainTasks).Error
+	if chain_err != nil {
+		return
+	}
+
+	runs := make([]gin.H, 0, len(chainTasks))
+
+	for _, chainTask := range chainTasks {
+
+		var events []models.EventEnvelope
+
+		err := database.DB.WithContext(ctx).
+			Where("job_id = ?", chainTask.JobId).
+			Order("occurred_at ASC").
+			Find(&events).Error
+
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		runs = append(runs, gin.H{
+			"job_id":      chainTask.JobId,
+			"retry_index": chainTask.RetryIndex,
+			"status":      chainTask.Status,
+			"events":      events,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"execution_chain_id": task.ExecutionChainId,
+		"runs":               runs,
+	})
+}

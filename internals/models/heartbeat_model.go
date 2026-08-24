@@ -13,7 +13,6 @@ type WorkerHeartbeat struct {
 	InstanceId      string    `json:"instance_id"`
 	OccurredAt      time.Time `json:"occurred_at"`
 	RunningAttempts int       `json:"running_attempts"`
-
-	// Capacity        int       `json:"capacity"`
+	Capacity        int       `json:"capacity"`
 	// Version         string    `json:"version"`
 }

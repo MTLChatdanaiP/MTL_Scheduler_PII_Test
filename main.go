@@ -30,7 +30,7 @@ func main() {
 	redisdb.ConnectRedis()
 
 	database.DB.AutoMigrate(
-		&models.Task{}, &models.PIIRecord{}, &models.EventEnvelope{}, &models.RunProjection{}, &models.Worker{}, &models.WorkerHeartbeat{})
+		&models.Task{}, &models.PIIRecord{}, &models.EventEnvelope{}, &models.RunProjection{}, &models.Worker{}, &models.WorkerHeartbeat{}, &models.QueueHealth{}, &models.Attempt{}, &models.ExecutionChain{})
 
 	r := routes.SetupRouter()
 
@@ -50,7 +50,7 @@ func main() {
 
 	var wg sync.WaitGroup
 
-	wg.Add(3)
+	wg.Add(4)
 
 	go func() {
 		defer wg.Done()
@@ -65,6 +65,11 @@ func main() {
 	go func() {
 		defer wg.Done()
 		worker.StartScheduler(ctx)
+	}()
+
+	go func() {
+		defer wg.Done()
+		worker.StartQueueHealth(ctx)
 	}()
 
 	fmt.Println("Running... press Ctrl+C to stop")

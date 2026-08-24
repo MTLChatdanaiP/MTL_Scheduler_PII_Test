@@ -22,9 +22,10 @@ type EventEnvelope struct {
 	Producer string `json:"producer"`
 
 	// RFC-001 §4 Domain Model: execution chain / run / attempt lineage fields — commented out, not built (this project models a Task directly rather than Run/Attempt per RFC-001)
-	//ExecutionChainID     string `json:"execution_chain_id"`
+	ExecutionChainID string `json:"execution_chain_id"`
 	//RunID                string `json:"run_id"`
-	//ParentRunID          string `json:"parent_run_id"`
+	ParentRunID string `json:"parent_run_id"`
+	RetryIndex  int    `json:"retry_index"`
 	//AttemptID            string `json:"attempt_id"`
 	///WorkerID             string `json:"worker_id"`
 	//ScheduleID           string `json:"schedule_id"`

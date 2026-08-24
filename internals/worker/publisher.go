@@ -2,6 +2,7 @@ package worker
 
 import (
 	"MTL_Scheduler_PII_Test/internals/cache"
+	"MTL_Scheduler_PII_Test/internals/events"
 
 	"context"
 	"fmt"
@@ -19,6 +20,9 @@ func PublishToStream(ctx context.Context, JobId string) {
 	}).Result()
 
 	if err != nil {
+		if cache.IsUnavailable(err) {
+			events.LogEvent(ctx, "system", "redis.unavailable", "publisher")
+		}
 		fmt.Println("XAdd error:", err)
 		return
 	}

@@ -46,6 +46,9 @@ func StartReclaimer(ctx context.Context, reclaimer_id string) {
 		}).Result()
 		if err != nil {
 			fmt.Println("xautoclaim error:", err)
+			if cache.IsUnavailable(err) {
+				events.LogEvent(ctx, "system", "redis.unavailable", "reclaimer")
+			}
 			time.Sleep(reclaimInterval)
 			continue
 		}

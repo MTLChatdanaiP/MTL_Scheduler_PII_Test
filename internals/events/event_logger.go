@@ -16,15 +16,28 @@ import (
 // PRD §28 Event Model
 func LogEvent(ctx context.Context, jobId string, eventType string, producer string) {
 
+	var task models.Task
 	// RFC-005 §6 Event Immutability: this row is append-only and is never edited/overwritten after being written
 	event := models.EventEnvelope{JobId: jobId, EventID: ulid.Make().String(), EventType: eventType, OccurredAt: time.Now(), Producer: producer}
-	err := database.DB.WithContext(ctx).Create(&event).Error
+
+	find_error := database.DB.WithContext(ctx).
+		Where("job_id = ?", jobId).
+		First(&task).Error
+
+	if find_error == nil {
+		event.ExecutionChainID = task.ExecutionChainId
+		event.ParentRunID = task.ParentRunId
+		event.RetryIndex = task.RetryIndex
+	}
+
+	write_err := database.DB.WithContext(ctx).Create(&event).Error
 
 	// RFC-005 §4 Core Design: "Monitoring receives immutable observations and builds projections." Every event write keeps the derived projection in sync.
-	UpdateProjection(ctx, jobId, eventType, event.OccurredAt)
-	if err != nil {
-		fmt.Println("FAILED TO WRITE EVENT: ", err)
+	if write_err != nil {
+		fmt.Println("FAILED TO WRITE EVENT: ", write_err)
 		// RFC-005 §15 Monitoring Gaps / §19 Metrics: monitoring_event_failures_total is the named metric for exactly this case — not yet implemented
 		//add a metric or counter or something idk
+	} else {
+		UpdateProjection(ctx, jobId, eventType, event.OccurredAt)
 	}
 }

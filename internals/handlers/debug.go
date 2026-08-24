@@ -18,6 +18,8 @@ func NUKE_THE_FUCKER(c *gin.Context) {
 		"run_projections",
 		"workers",
 		"worker_heartbeats",
+		"attempts",
+		"queue_healths",
 	}
 
 	for _, table := range tables {

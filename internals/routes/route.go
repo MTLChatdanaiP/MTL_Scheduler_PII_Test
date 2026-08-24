@@ -21,5 +21,8 @@ func SetupRouter() *gin.Engine {
 
 	r.DELETE("/debug/reset", handlers.NUKE_THE_FUCKER)
 
+	r.GET("/runs/:job_id/metrics", handlers.GetRunMetrics)
+	r.GET("/runs/:job_id/chain", handlers.GetRunChain)
+
 	return r
 }
