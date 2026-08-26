@@ -97,7 +97,7 @@ func ProcessTask(ctx context.Context, JobId string, workerId string) {
 		WorkerId:      workerId,
 		Status:        "Claimed",
 		AttemptNumber: int(count) + 1,
-		ClaimedAt:     time.Now(),
+		ClaimedAt:     time.Now().UTC(),
 	}
 	database.DB.WithContext(ctx).Create(&attempt)
 
@@ -112,7 +112,7 @@ func ProcessTask(ctx context.Context, JobId string, workerId string) {
 
 	// RFC-001 §9 Commands: MarkAttemptStarted
 	attempt.Status = "Started"
-	attempt.StartedAt = time.Now()
+	attempt.StartedAt = time.Now().UTC()
 	database.DB.WithContext(ctx).Save(&attempt)
 	//change note status from "Pending" to "Running"
 	slog.Info("task started", "worker_id", workerId, "job_id", JobId)
@@ -128,7 +128,7 @@ func ProcessTask(ctx context.Context, JobId string, workerId string) {
 	// RFC-001 §9 Commands: MarkAttemptSucceeded + MarkRunSucceeded
 	case Success:
 		attempt.Status = "Succeeded"
-		attempt.FinishedAt = time.Now()
+		attempt.FinishedAt = time.Now().UTC()
 		db.WithContext(ctx).Save(&attempt)
 
 		// RFC-001 §8 Invariant 11: only mark the run SUCCEEDED after confirming
@@ -141,7 +141,7 @@ func ProcessTask(ctx context.Context, JobId string, workerId string) {
 		}
 
 		task.Status = "Completed"
-		task.FinishedAt = time.Now()
+		task.FinishedAt = time.Now().UTC()
 		db.WithContext(ctx).Save(&task)
 
 		// RFC-000 §5.3: attempt.succeeded-equivalent event
@@ -159,11 +159,11 @@ func ProcessTask(ctx context.Context, JobId string, workerId string) {
 		// the FAILED run stays terminal — RFC-001 §5: "A failed parent run
 		// remains terminal after its retry child is created"
 		task.Status = "Failed"
-		task.FinishedAt = time.Now()
+		task.FinishedAt = time.Now().UTC()
 		db.WithContext(ctx).Save(&task)
 
 		attempt.Status = "Abandoned"
-		attempt.FinishedAt = time.Now()
+		attempt.FinishedAt = time.Now().UTC()
 		database.DB.WithContext(ctx).Save(&attempt)
 
 		events.LogEvent(ctx, task.JobId, "task.retry_scheduled", "worker")
@@ -178,7 +178,7 @@ func ProcessTask(ctx context.Context, JobId string, workerId string) {
 			TaskType:         "Default", // reset from "fail_retryable" so it doesn't loop forever
 			Payload:          task.Payload,
 			Status:           "Pending",
-			RunAt:            time.Now().Add(10 * time.Second),
+			RunAt:            time.Now().UTC().Add(10 * time.Second),
 			ExecutionChainId: task.ExecutionChainId, // SAME chain as the parent
 			ParentRunId:      task.JobId,            // points back to the failed run
 			RetryIndex:       task.RetryIndex + 1,
@@ -192,7 +192,7 @@ func ProcessTask(ctx context.Context, JobId string, workerId string) {
 		db.WithContext(ctx).Save(&task)
 
 		attempt.Status = "Failed"
-		attempt.FinishedAt = time.Now()
+		attempt.FinishedAt = time.Now().UTC()
 		attempt.FailureCategory = "APPLICATION_ERROR"
 		db.WithContext(ctx).Save(&attempt)
 
@@ -240,7 +240,7 @@ func ProcessStream(ctx context.Context, Consumer string, StreamText string, Grou
 	msg := Message
 
 	fmt.Printf("[%s] Received %s: %v (at %s)\n",
-		Consumer, msg.ID, msg.Values, time.Now().Format("15:04:05"))
+		Consumer, msg.ID, msg.Values, time.Now().UTC().Format("15:04:05"))
 
 	taskId, ok := msg.Values["job_id"].(string)
 
@@ -276,8 +276,7 @@ func SetupWorker(ctx context.Context, worker_id string) {
 	fmt.Printf("[%s] Setting Up Worker\n", worker_id)
 
 	workerStruct := CreateWorker(ctx, worker_id)
-	workerInstId := workerStruct.InstanceId //unused cause we got sidetracked on this lol
-
+	workerInstId := workerStruct.InstanceId
 	// RFC-004 §6: heartbeat starts immediately after worker identity is registered, before any message processing begins
 	go StartHeartbeat(ctx, worker_id, workerInstId)
 

@@ -30,7 +30,7 @@ func main() {
 	redisdb.ConnectRedis()
 
 	database.DB.AutoMigrate(
-		&models.Task{}, &models.PIIRecord{}, &models.EventEnvelope{}, &models.RunProjection{}, &models.Worker{}, &models.WorkerHeartbeat{}, &models.QueueHealth{}, &models.Attempt{}, &models.ExecutionChain{})
+		&models.Task{}, &models.PIIRecord{}, &models.EventEnvelope{}, &models.RunProjection{}, &models.Worker{}, &models.WorkerHeartbeat{}, &models.QueueHealth{}, &models.Attempt{}, &models.ExecutionChain{}, &models.ScheduleDefinition{}, &models.MonitoringAnnotation{}, &models.MonitoringHealth{})
 
 	r := routes.SetupRouter()
 
@@ -50,27 +50,13 @@ func main() {
 
 	var wg sync.WaitGroup
 
-	wg.Add(4)
+	wg.Add(5)
 
-	go func() {
-		defer wg.Done()
-		worker.SetupWorker(ctx, "Consumer-a")
-	}()
-
-	go func() {
-		defer wg.Done()
-		worker.StartReclaimer(ctx, "Consumer_Backup")
-	}()
-
-	go func() {
-		defer wg.Done()
-		worker.StartScheduler(ctx)
-	}()
-
-	go func() {
-		defer wg.Done()
-		worker.StartQueueHealth(ctx)
-	}()
+	go func() { defer wg.Done(); worker.SetupWorker(ctx, "Consumer-a") }()
+	go func() { defer wg.Done(); worker.StartReclaimer(ctx, "Consumer_Backup") }()
+	go func() { defer wg.Done(); worker.StartScheduler(ctx, "Schedule_Buddy") }()
+	go func() { defer wg.Done(); worker.StartQueueHealth(ctx) }()
+	go func() { defer wg.Done(); worker.StartMonitoringSweep(ctx) }()
 
 	fmt.Println("Running... press Ctrl+C to stop")
 	<-ctx.Done()

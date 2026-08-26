@@ -20,6 +20,10 @@ func NUKE_THE_FUCKER(c *gin.Context) {
 		"worker_heartbeats",
 		"attempts",
 		"queue_healths",
+		"execution_chains",
+		"schedule_definitions",
+		"monitoring_annotations",
+		"monitoring_healths",
 	}
 
 	for _, table := range tables {

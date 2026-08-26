@@ -18,7 +18,7 @@ func LogEvent(ctx context.Context, jobId string, eventType string, producer stri
 
 	var task models.Task
 	// RFC-005 §6 Event Immutability: this row is append-only and is never edited/overwritten after being written
-	event := models.EventEnvelope{JobId: jobId, EventID: ulid.Make().String(), EventType: eventType, OccurredAt: time.Now(), Producer: producer}
+	event := models.EventEnvelope{JobId: jobId, EventID: ulid.Make().String(), EventType: eventType, OccurredAt: time.Now().UTC(), Producer: producer}
 
 	find_error := database.DB.WithContext(ctx).
 		Where("job_id = ?", jobId).

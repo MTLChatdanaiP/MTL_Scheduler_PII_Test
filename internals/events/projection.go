@@ -24,15 +24,15 @@ func UpdateProjection(ctx context.Context, jobId string, eventType string, occur
 		status = "Pending"
 	case "task.queued":
 		field = "queued_at"
-		value = time.Now()
+		value = time.Now().UTC()
 		status = "Queued"
 	case "task.started":
 		field = "started_at"
-		value = time.Now()
+		value = time.Now().UTC()
 		status = "Running"
 	case "task.completed":
 		field = "completed_at"
-		value = time.Now()
+		value = time.Now().UTC()
 		status = "Completed"
 	case "task.recovery_started":
 		field = "was_reclaimed"

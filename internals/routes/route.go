@@ -24,5 +24,7 @@ func SetupRouter() *gin.Engine {
 	r.GET("/runs/:job_id/metrics", handlers.GetRunMetrics)
 	r.GET("/runs/:job_id/chain", handlers.GetRunChain)
 
+	r.PATCH("/schedules/:schedule_id/:flip", handlers.GetTask)
+
 	return r
 }

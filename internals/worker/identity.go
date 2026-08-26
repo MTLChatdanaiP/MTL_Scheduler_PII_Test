@@ -19,7 +19,7 @@ func CreateWorker(ctx context.Context, workerId string) models.Worker {
 		hostname = "idk insert error messages?"
 	}
 
-	worker := models.Worker{WorkerId: workerId, InstanceId: ulid.Make().String(), Hostname: hostname, StartedAt: time.Now()}
+	worker := models.Worker{WorkerId: workerId, InstanceId: ulid.Make().String(), Hostname: hostname, StartedAt: time.Now().UTC()}
 
 	database.DB.WithContext(ctx).Create(&worker)
 	RegisterWorkerCounter(workerId)

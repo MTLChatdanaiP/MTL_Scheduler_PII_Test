@@ -60,7 +60,7 @@ func SampleQueueHealth(ctx context.Context, sampleSize int64) (models.QueueHealt
 		PendingCount:            pending.Count,
 		OldestPendingAgeSeconds: int64(oldestPendingAge.Seconds()),
 		ConsumerCount:           len(consumers),
-		SampledAt:               time.Now(),
+		SampledAt:               time.Now().UTC(),
 	}
 
 	return result, nil

@@ -20,6 +20,10 @@ type Task struct {
 	// RFC-002 §4 Domain Model (ScheduleOccurrence.expected_at) / §7 Scheduling Flow — this project stores the due time directly on Task rather than a separate ScheduleDefinition/ScheduleOccurrence model
 	RunAt time.Time
 
+	// RFC-002 §8 Schedule Drift: only meaningfully set for tasks spawned from
+	// a ScheduleDefinition; stays zero-value for directly-POSTed tasks
+	ExpectedAt time.Time
+
 	// RFC-001 §4 Domain Model (ExecutionChain/JobRun): a policy-level retry
 	// creates a NEW Task row rather than mutating this one — these three fields
 	// preserve the lineage. ExecutionChainId is shared across a task and all
@@ -29,5 +33,8 @@ type Task struct {
 	ParentRunId      string // empty for the original task; set to the failed task's JobId for retries
 	RetryIndex       int    // 0 for the original, +1 per retry
 
+	// RFC-001 §12: populated only for Rerun/Replay (new execution_chain_id,
+	// references the old run) — never set by the current automatic-retry path,
+	// which reuses the same execution_chain_id instead via ParentRunId
 	SourceRunId string `json:"source_run_id"`
 }

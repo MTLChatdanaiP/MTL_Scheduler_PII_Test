@@ -26,7 +26,7 @@ type Phase struct {
 func Run(ctx context.Context, phases []Phase) {
 	for _, phase := range phases {
 		phaseCtx, cancel := context.WithTimeout(ctx, phase.Timeout)
-		start := time.Now()
+		start := time.Now().UTC()
 
 		err := phase.Run(phaseCtx)
 

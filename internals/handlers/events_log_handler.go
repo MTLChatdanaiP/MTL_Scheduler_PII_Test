@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -81,6 +82,11 @@ func GetRunMetrics(c *gin.Context) {
 	executionDuration := task.FinishedAt.Sub(Attempt.StartedAt)
 	runDuration := task.FinishedAt.Sub(task.CreatedAt)
 
+	var creationDrift time.Duration
+	if !task.ExpectedAt.IsZero() {
+		creationDrift = task.CreatedAt.Sub(task.ExpectedAt)
+	}
+
 	retryCount := len(chainTasks) - 1
 	chainTotalDuration := chainTasks[len(chainTasks)-1].FinishedAt.Sub(chainTasks[0].CreatedAt)
 
@@ -93,6 +99,7 @@ func GetRunMetrics(c *gin.Context) {
 		"run_duration":         runDuration,
 		"retry_count":          retryCount,
 		"chain_total_duration": chainTotalDuration,
+		"creation_drift":       creationDrift,
 	})
 }
 
