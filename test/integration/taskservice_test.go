@@ -10,6 +10,7 @@ import (
 	"github.com/oklog/ulid/v2"
 	"gorm.io/gorm/clause"
 
+	"MTL_Scheduler_PII_Test/internals/cache"
 	redisdb "MTL_Scheduler_PII_Test/internals/cache"
 	"MTL_Scheduler_PII_Test/internals/database"
 	"MTL_Scheduler_PII_Test/internals/models"
@@ -21,6 +22,14 @@ func TestMain(m *testing.M) {
 	godotenv.Load("../../.env") // adjust relative path to your actual .env
 	database.ConnectDatabase()
 	redisdb.ConnectRedis()
+
+	database.DB.AutoMigrate(
+		&models.Task{}, &models.PIIRecord{}, &models.EventEnvelope{}, &models.RunProjection{},
+		&models.Worker{}, &models.WorkerHeartbeat{}, &models.QueueHealth{}, &models.Attempt{},
+		&models.ExecutionChain{}, &models.ScheduleDefinition{}, &models.MonitoringAnnotation{}, &models.MonitoringHealth{},
+	)
+
+	redisdb.Client.XGroupCreateMkStream(context.Background(), cache.TaskStream, worker.WorkerGroupA, "$")
 
 	os.Exit(m.Run())
 }
