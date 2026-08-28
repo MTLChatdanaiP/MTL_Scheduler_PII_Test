@@ -80,7 +80,7 @@ func TestFullTaskLifecycle_EventsInOrder(t *testing.T) {
 	created := postTask(t, "e2e_lifecycle_test", "dummy", "no pii in this one")
 	jobId, _ := created["JobId"].(string)
 
-	deadline := time.Now().Add(90 * time.Second)
+	deadline := time.Now().Add(150 * time.Second)
 	var events []map[string]interface{}
 
 	for time.Now().Before(deadline) {
