@@ -82,6 +82,7 @@ func TestFullTaskLifecycle_EventsInOrder(t *testing.T) {
 
 	deadline := time.Now().Add(150 * time.Second)
 	var events []map[string]interface{}
+	found := false
 
 	for time.Now().Before(deadline) {
 		resp, err := http.Get(baseURL + "/events/" + jobId)
@@ -89,14 +90,21 @@ func TestFullTaskLifecycle_EventsInOrder(t *testing.T) {
 			json.NewDecoder(resp.Body).Decode(&events)
 			resp.Body.Close()
 		}
-		if len(events) >= 4 {
+
+		for _, e := range events {
+			if eventType, _ := e["event_type"].(string); eventType == "task.completed" {
+				found = true
+			}
+		}
+
+		if found {
 			break
 		}
 		time.Sleep(2 * time.Second)
 	}
 
-	if len(events) < 4 {
-		t.Fatalf("expected at least 4 events, got %d", len(events))
+	if !found {
+		t.Fatalf("task never reached task.completed within the deadline, got %d events", len(events))
 	}
 
 	wantSequence := []string{"task.created", "task.queued", "task.started", "task.completed"}
