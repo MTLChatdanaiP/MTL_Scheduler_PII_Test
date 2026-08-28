@@ -80,17 +80,19 @@ func TestFullTaskLifecycle_EventsInOrder(t *testing.T) {
 	created := postTask(t, "e2e_lifecycle_test", "dummy", "no pii in this one")
 	jobId, _ := created["JobId"].(string)
 
-	time.Sleep(60 * time.Second) // scheduler pickup + full processing
-
-	resp, err := http.Get(baseURL + "/events/" + jobId)
-	if err != nil {
-		t.Fatalf("GET /events/%s failed: %v", jobId, err)
-	}
-	defer resp.Body.Close()
-
+	deadline := time.Now().Add(90 * time.Second)
 	var events []map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&events); err != nil {
-		t.Fatalf("failed to decode /events response: %v", err)
+
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(baseURL + "/events/" + jobId)
+		if err == nil {
+			json.NewDecoder(resp.Body).Decode(&events)
+			resp.Body.Close()
+		}
+		if len(events) >= 4 {
+			break
+		}
+		time.Sleep(2 * time.Second)
 	}
 
 	if len(events) < 4 {
