@@ -26,5 +26,7 @@ func SetupRouter() *gin.Engine {
 
 	r.PATCH("/schedules/:schedule_id/:flip", handlers.GetTask)
 
+	r.GET("/metrics", handlers.GetMetrics)
+
 	return r
 }

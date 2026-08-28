@@ -296,7 +296,8 @@ func resolveClearedAnnotations(ctx context.Context, annotationType string) {
 		isFreshAgain := time.Since(latestEvent.OccurredAt) < stuckThreshold
 
 		if isTerminal || isFreshAgain {
-			annotation.ResolvedAt = time.Now().UTC()
+			now := time.Now().UTC()
+			annotation.ResolvedAt = &now
 
 			if err := database.DB.WithContext(ctx).Save(&annotation).Error; err != nil {
 				fmt.Println("Failed to resolve monitoring annotation:", annotation.AnnotationID, err)
@@ -369,7 +370,8 @@ func resolveDuplicateExecutionAnnotations(ctx context.Context) {
 			Count(&count)
 
 		if count <= 1 {
-			a.ResolvedAt = time.Now().UTC()
+			now := time.Now().UTC()
+			a.ResolvedAt = &now
 			database.DB.WithContext(ctx).Save(&a)
 		}
 	}
@@ -432,7 +434,8 @@ func resolveScheduleDriftAnnotations(ctx context.Context) {
 		database.DB.WithContext(ctx).Where("schedule_id = ?", a.SubjectID).First(&sched)
 
 		if time.Since(sched.NextRunAt) < missedOccurrenceThreshold {
-			a.ResolvedAt = time.Now().UTC()
+			now := time.Now().UTC()
+			a.ResolvedAt = &now
 			database.DB.WithContext(ctx).Save(&a)
 		}
 	}
@@ -495,7 +498,8 @@ func resolveQueueBacklogAnnotations(ctx context.Context) {
 
 	if latest.PendingCount <= backlogThreshold {
 		for _, a := range annotations {
-			a.ResolvedAt = time.Now().UTC()
+			now := time.Now().UTC()
+			a.ResolvedAt = &now
 			database.DB.WithContext(ctx).Save(&a)
 		}
 	}

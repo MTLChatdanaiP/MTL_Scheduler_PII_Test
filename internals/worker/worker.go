@@ -31,6 +31,8 @@ const WorkerGroupA = "WorkerG_A"
 
 // RFC-004 §9 Capacity: "active_attempts" — global total across all workers
 var activeAttempts int64
+var progressChunkDuration = 5 * time.Second
+var progressChunkCount = 6
 
 // (RFC-001 §14's list: APPLICATION_ERROR, INVALID_INPUT, DEPENDENCY_ERROR,
 // TIMEOUT, WORKER_FAILURE, INFRASTRUCTURE_ERROR, UNKNOWN)
@@ -44,8 +46,8 @@ func runHandler(ctx context.Context, task models.Task) ExecutionOutcome {
 		return NonRetryableFailure
 
 	default:
-		for i := 0; i < 6; i++ {
-			time.Sleep(5 * time.Second)
+		for i := 0; i < progressChunkCount; i++ {
+			time.Sleep(progressChunkDuration)
 			events.LogEvent(ctx, task.JobId, "task.progress", "worker")
 		}
 		return Success

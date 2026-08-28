@@ -15,5 +15,5 @@ type MonitoringAnnotation struct {
 	SubjectID    string
 	DerivedAt    time.Time
 	Evidence     string
-	ResolvedAt   time.Time
+	ResolvedAt   *time.Time
 }
