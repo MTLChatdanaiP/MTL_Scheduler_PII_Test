@@ -1,0 +1,83 @@
+name: Run Tests
+ 
+on:
+  push:
+  pull_request:
+ 
+jobs:
+  test:
+    runs-on: ubuntu-latest
+ 
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: mydb_two
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+ 
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+ 
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+ 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+ 
+      - name: Create .env for tests
+        run: |
+          echo "DB_HOST=localhost" >> .env
+          echo "DB_PORT=5432" >> .env
+          echo "DB_USER=postgres" >> .env
+          echo "DB_PASSWORD=password" >> .env
+          echo "DB_NAME=mydb_two" >> .env
+          echo "REDIS_ADDR=localhost:6379" >> .env
+ 
+      - name: Run unit tests
+        run: go test -timeout 300s ./test/unit/...
+ 
+      - name: Run integration tests
+        run: go test -timeout 300s ./test/intergration/...
+ 
+      - name: Run internal tests
+        run: go test -timeout 300s ./internals/...
+ 
+      - name: Build the app
+        run: go build -o app .
+ 
+      - name: Start the app in the background
+        run: |
+          ./app &
+          sleep 5
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USER: postgres
+          DB_PASSWORD: password
+          DB_NAME: mydb_two
+          REDIS_ADDR: localhost:6379
+ 
+      - name: Run e2e tests
+        run: >-
+          go test -timeout 300s -run
+          "TestCreateTask_RedactsPII|TestFullTaskLifecycle_EventsInOrder|TestRetryChain_ShowsTwoLinkedRuns|TestDebugReset_ClearsAllTables|TestMetrics_ReflectsRealCounts"
+          ./test/e2e/...
+
