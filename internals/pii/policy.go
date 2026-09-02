@@ -59,3 +59,26 @@ func ResolveAction(detectorID string, policy models.PIIPolicy) string {
 
 	return policy.Spec.Defaults.Action
 }
+
+func ValidatePolicy(policy models.PIIPolicy) []string {
+	var problems []string
+
+	valid_det := make(map[string]bool)
+
+	// TODO 1: build a set of valid detector IDs from policy.Spec.Detectors
+	// (a map[string]bool works well for "does this ID exist" lookups)
+
+	// TODO 2: for each detector, if Type == "REGEX", try regexp.Compile(det.Pattern)
+	// — if it fails, append a problem describing WHICH detector and WHY
+
+	// TODO 3: for each rule, for each id in rule.DetectorIDs, check that
+	// id actually exists in the set from TODO 1 — if not, append a
+	// problem describing which rule references a nonexistent detector
+
+	// TODO 4: check for duplicate rule Priority values — RFC-006's
+	// FIRST_MATCH semantics implicitly assume priority creates a clear
+	// order; two rules sharing the same priority is at least worth
+	// flagging as ambiguous, even if you don't hard-fail on it
+
+	return problems
+}
