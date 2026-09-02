@@ -6,14 +6,26 @@ import "gorm.io/gorm"
 // PRD §33 PII Finding Model
 type PIIRecord struct {
 	gorm.Model
-	// RFC-006 §8: run_id correlation field (named JobId here to match this project's task identifier)
-	JobId string // which task this PII came from
-	Type  string // Email, Phone, SSN, CreditCard — matches pii.PIIType
-	// RFC-006 §9 Raw Value Handling: "Default: store_raw_value = false." This project deviates and stores the raw value directly rather than a keyed fingerprint — documented simplification
-	Value string // the actual sensitive value
-	Index int
-	// RFC-006 §4 Scan Sources: JOB_PAYLOAD / JOB_METADATA / JOB_RESULT / ERROR_MESSAGE / STRUCTURED_LOG — only JOB_PAYLOAD is currently produced
+
+	// RFC-006 §8: run_id correlation field.
+	JobID string
+	Type  string
+
+	// Detection metadata.
+	DetectorID string
+	Confidence float64 // regex detector always reports 1.0
+
+	// RFC-006 §4: JOB_PAYLOAD, JOB_METADATA, JOB_RESULT,
+	// ERROR_MESSAGE, STRUCTURED_LOG.
+	// Currently only JOB_PAYLOAD is used.
 	Source string
-	// RFC-006 §8 Finding Model: confidence score — regex detector always reports 1.0 (no partial-certainty concept for pattern matching)
-	Confidence float64
+	Index  int
+
+	// RFC-006 §9 recommends storing a fingerprint by default.
+	// This project intentionally stores the raw value as a
+	// documented simplification.
+	FingerprintValue string
+
+	// Policy outcome.
+	PolicyAction string
 }

@@ -16,6 +16,7 @@ import (
 	redisdb "MTL_Scheduler_PII_Test/internals/cache"
 	"MTL_Scheduler_PII_Test/internals/database"
 	"MTL_Scheduler_PII_Test/internals/models"
+	pii "MTL_Scheduler_PII_Test/internals/pii"
 	"MTL_Scheduler_PII_Test/internals/routes"
 	"MTL_Scheduler_PII_Test/internals/shutdown"
 	"MTL_Scheduler_PII_Test/internals/worker"
@@ -30,7 +31,11 @@ func main() {
 	redisdb.ConnectRedis()
 
 	database.DB.AutoMigrate(
-		&models.Task{}, &models.PIIRecord{}, &models.EventEnvelope{}, &models.RunProjection{}, &models.Worker{}, &models.WorkerHeartbeat{}, &models.QueueHealth{}, &models.Attempt{}, &models.ExecutionChain{}, &models.ScheduleDefinition{}, &models.MonitoringAnnotation{}, &models.MonitoringHealth{})
+		&models.Task{}, &models.PIIRecord{},
+		&models.EventEnvelope{}, &models.RunProjection{},
+		&models.Worker{}, &models.WorkerHeartbeat{}, &models.QueueHealth{},
+		&models.Attempt{}, &models.ExecutionChain{}, &models.ScheduleDefinition{},
+		&models.MonitoringAnnotation{}, &models.MonitoringHealth{}, &models.PIIVault{})
 
 	r := routes.SetupRouter()
 
@@ -38,6 +43,12 @@ func main() {
 		Addr:    ":8080",
 		Handler: r, // your gin.Engine — think about why Gin's Engine can be used as a Handler here (hint: what interface must a type satisfy to be usable as http.Server's Handler?)
 	}
+
+	policy, err := pii.LoadPolicy("policies/default.json")
+	if err != nil {
+		log.Fatal("Broken Policy, Stopping App")
+	}
+	pii.LoadedPolicy = policy
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

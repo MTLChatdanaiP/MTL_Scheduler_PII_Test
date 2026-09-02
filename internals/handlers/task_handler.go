@@ -11,16 +11,6 @@ import (
 	"MTL_Scheduler_PII_Test/internals/taskservice"
 )
 
-// NOTE: duplicate of internals/pii.PIIType — unused in this file, left over from an earlier draft before pii.AllTypes/pii.Detect existed
-type PIIType string
-
-const (
-	Email      PIIType = "Email"
-	Phone      PIIType = "Phone"
-	SSN        PIIType = "SSN"
-	CreditCard PIIType = "CreditCard"
-)
-
 // PRD §10.1 Job Submission / §10.2 Immediate Jobs / §10.3 Scheduled Jobs — handles both immediate and scheduled tasks depending on whether RunAt is provided
 // RFC-001 §4 Domain Model: this is where a JobRun-equivalent (Task) is created
 func CreateTask(c *gin.Context) { // RFC-001 §9 Commands: CreateInitialRun

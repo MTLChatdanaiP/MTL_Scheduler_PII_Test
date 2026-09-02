@@ -37,4 +37,6 @@ type Task struct {
 	// references the old run) — never set by the current automatic-retry path,
 	// which reuses the same execution_chain_id instead via ParentRunId
 	SourceRunId string `json:"source_run_id"`
+
+	ScanStatus string // "NOT_SCANNED" (default), "CLEAN", "DETECTED", "SCAN_ERROR"
 }

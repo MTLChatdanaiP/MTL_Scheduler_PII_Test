@@ -19,7 +19,7 @@ func TestDetect(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			findings := pii.Detect(tt.input)
+			findings := pii.Detect(tt.input, pii.LoadedPolicy.Spec.Detectors)
 			if len(findings) != tt.wantLen {
 				t.Errorf("Detect(%q) returned %d findings, want %d", tt.input, len(findings), tt.wantLen)
 			}
@@ -39,9 +39,9 @@ func TestReplacer(t *testing.T) {
 		index        string
 		wantContains string
 	}{
-		{"replaces email with placeholder", "contact me@x.com now", "me@x.com", pii.Email, "1", "[Email-1]"},
-		{"replaces phone with placeholder", "call 081-234-5678 today", "081-234-5678", pii.Phone, "1", "[Phone-1]"},
-		{"replaces second occurrence with correct index", "ssn 123-45-6789 again", "123-45-6789", pii.SSN, "2", "[SSN-2]"},
+		{"replaces email with placeholder", "contact me@x.com now", "me@x.com", pii.PIIType("Email"), "1", "[Email-1]"},
+		{"replaces phone with placeholder", "call 081-234-5678 today", "081-234-5678", pii.PIIType("Phone"), "1", "[Phone-1]"},
+		{"replaces second occurrence with correct index", "ssn 123-45-6789 again", "123-45-6789", pii.PIIType("SSN"), "2", "[SSN-2]"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

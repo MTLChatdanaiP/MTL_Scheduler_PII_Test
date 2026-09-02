@@ -13,7 +13,7 @@ import (
 	"MTL_Scheduler_PII_Test/internals/database"
 	"MTL_Scheduler_PII_Test/internals/events"
 	"MTL_Scheduler_PII_Test/internals/models"
-	"MTL_Scheduler_PII_Test/internals/pii"
+	pii "MTL_Scheduler_PII_Test/internals/pii"
 )
 
 func CreateTask_Direct(ctx context.Context, task models.Task) models.Task {
@@ -41,23 +41,38 @@ func CreateTask_Direct(ctx context.Context, task models.Task) models.Task {
 
 	temp := make(map[pii.PIIType]int)
 
-	for _, piiType := range pii.AllTypes {
-		temp[piiType] = 0
-	}
+	findings := pii.Detect(task.Payload, pii.LoadedPolicy.Spec.Detectors)
 
+	if len(findings) == 0 {
+		task.ScanStatus = "CLEAN"
+	} else {
+		task.ScanStatus = "DETECTED"
+	}
 	// RFC-006 §12 Pre-Execution Scanning: "an implementation may scan... before publishing to Redis... The chosen boundary affects whether raw PII enters Redis." This project scans and redacts before the task is ever saved or published, so raw PII never enters Postgres or the Redis stream
-	for _, value := range pii.Detect(task.Payload) {
+	for _, value := range findings {
+
+		action := pii.ResolveAction(value.DetectorID, pii.LoadedPolicy)
+
 		temp[value.Type] += 1
 
 		// RFC-006 §7 Scan Model — Policy Evaluation stage, REDACT branch: finding is persisted separately (Claim Check) before the payload is rewritten
-		record := models.PIIRecord{JobId: task.JobId, Type: string(value.Type), Value: value.Match, Index: temp[value.Type], Source: "JOB_PAYLOAD", Confidence: 1.0}
+		record := models.PIIRecord{JobID: task.JobId, Type: string(value.Type), DetectorID: value.DetectorID, FingerprintValue: pii.Fingerprint(value.Match), Index: temp[value.Type], Source: "JOB_PAYLOAD", Confidence: 1.0, PolicyAction: action}
 		database.DB.WithContext(ctx).Create(&record)
-		fmt.Println(record)
+		events.LogEvent(ctx, task.JobId, "pii.detected", "api")
 
 		// RFC-006 §14 PII-Safe Logging: payload is rewritten so no downstream system (Redis, worker logs, monitoring) ever sees the raw value
-		task.Payload = pii.Replacer(task.Payload, value.Match, value.Type, strconv.Itoa(temp[value.Type]))
+		if action == "REDACT" {
+			task.Payload = pii.Replacer(task.Payload, value.Match, value.Type, strconv.Itoa(temp[value.Type]))
+		}
 
-		fmt.Println(task.Payload)
+		encryptedMatch, err := pii.Encrypt(value.Match)
+		if err != nil {
+			events.LogEvent(ctx, task.JobId, "pii.encryption.failed", "api")
+			continue // skip creating a vault entry for this one finding — don't store a fake "ERROR!!!" placeholder as if it were real data
+		}
+
+		vault := models.PIIVault{JobId: task.JobId, Type: string(value.Type), Index: temp[value.Type], EncryptedValue: encryptedMatch}
+		database.DB.WithContext(ctx).Create(&vault)
 	}
 	fmt.Println("Final: ", task.Payload)
 

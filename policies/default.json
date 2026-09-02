@@ -1,0 +1,66 @@
+{
+  "apiVersion": "monitoring.job/v1alpha1",
+  "kind": "PIIPolicy",
+  "metadata": {
+    "name": "default",
+    "version": 1,
+    "checksum": "a163c94f2cbcc75685021834bee99edf4c61dc9524995b866d403213c354dd57"
+  },
+  "spec": {
+    "evaluationMode": "FIRST_MATCH",
+    "defaults": {
+      "action": "OBSERVE",
+      "onScanError": "FAIL_OPEN"
+    },
+    "detectors": [
+    {
+        "id": "builtin-email",
+        "piiType": "Email",
+        "type": "REGEX",
+        "enabled": true,
+        "pattern": "[^\\s@]+@[^\\s@]+\\.[^\\s@]+",
+        "minimumConfidence": 1.0
+    },
+    {
+        "id": "builtin-phone",
+        "piiType": "Phone",
+        "type": "REGEX",
+        "enabled": true,
+        "pattern": "\\d{3}-\\d{3}-\\d{4}",
+        "minimumConfidence": 1.0
+    },
+    {
+        "id": "builtin-ssn",
+        "piiType": "SSN",
+        "type": "REGEX",
+        "enabled": true,
+        "pattern": "\\d{3}-\\d{2}-\\d{4}",
+        "minimumConfidence": 1.0
+    },
+    {
+        "id": "builtin-creditcard",
+        "piiType": "CreditCard",
+        "type": "REGEX",
+        "enabled": true,
+        "pattern": "\\d{4}-\\d{4}-\\d{4}-\\d{4}",
+        "minimumConfidence": 1.0
+    },
+    {
+        "id": "builtin-ipaddress",
+        "piiType": "IPAddress",
+        "type": "REGEX",
+        "enabled": true,
+        "pattern": "\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b",
+        "minimumConfidence": 1.0
+    }
+    ],
+    "rules": [
+      {
+        "id": "redact-all-default",
+        "priority": 0,
+        "detectorIds": ["builtin-email", "builtin-phone", "builtin-ssn", "builtin-creditcard", "builtin-ipaddress"],
+        "action": "REDACT"
+      }
+    ]
+  }
+}

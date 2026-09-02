@@ -14,6 +14,7 @@ import (
 	redisdb "MTL_Scheduler_PII_Test/internals/cache"
 	"MTL_Scheduler_PII_Test/internals/database"
 	"MTL_Scheduler_PII_Test/internals/models"
+	"MTL_Scheduler_PII_Test/internals/pii"
 	"MTL_Scheduler_PII_Test/internals/taskservice"
 	"MTL_Scheduler_PII_Test/internals/worker"
 )
@@ -27,6 +28,7 @@ func TestMain(m *testing.M) {
 		&models.Task{}, &models.PIIRecord{}, &models.EventEnvelope{}, &models.RunProjection{},
 		&models.Worker{}, &models.WorkerHeartbeat{}, &models.QueueHealth{}, &models.Attempt{},
 		&models.ExecutionChain{}, &models.ScheduleDefinition{}, &models.MonitoringAnnotation{}, &models.MonitoringHealth{},
+		&models.PIIVault{},
 	)
 
 	redisdb.Client.XGroupCreateMkStream(context.Background(), cache.TaskStream, worker.WorkerGroupA, "$")
@@ -34,7 +36,7 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func TestCreateTask_RedactsAndStoresFindings(t *testing.T) {
+func TestCreateTaskRecord_RedactsAndStoresFindings(t *testing.T) {
 	ctx := context.Background()
 
 	task := models.Task{
@@ -44,11 +46,6 @@ func TestCreateTask_RedactsAndStoresFindings(t *testing.T) {
 	}
 
 	result := taskservice.CreateTask_Direct(ctx, task)
-
-	t.Cleanup(func() {
-		database.DB.Where("job_id = ?", result.JobId).Delete(&models.Task{})
-		database.DB.Where("job_id = ?", result.JobId).Delete(&models.PIIRecord{})
-	})
 
 	if strings.Contains(result.Payload, "test@example.com") {
 		t.Error("payload still contains raw email, expected redaction")
@@ -60,8 +57,25 @@ func TestCreateTask_RedactsAndStoresFindings(t *testing.T) {
 	if len(records) != 1 {
 		t.Fatalf("expected 1 PIIRecord, got %d", len(records))
 	}
-	if records[0].Value != "test@example.com" {
-		t.Errorf("expected raw value preserved in PIIRecord, got %q", records[0].Value)
+
+	expectedFingerprint := pii.Fingerprint("test@example.com")
+	if records[0].FingerprintValue != expectedFingerprint {
+		t.Errorf("expected fingerprint %q, got %q", expectedFingerprint, records[0].FingerprintValue)
+	}
+
+	var vaultEntries []models.PIIVault
+	database.DB.Where("job_id = ?", result.JobId).Find(&vaultEntries)
+
+	if len(vaultEntries) != 1 {
+		t.Fatalf("expected 1 PIIVault entry, got %d", len(vaultEntries))
+	}
+
+	decrypted, err := pii.Decrypt(vaultEntries[0].EncryptedValue)
+	if err != nil {
+		t.Fatalf("failed to decrypt vault entry: %v", err)
+	}
+	if decrypted != "test@example.com" {
+		t.Errorf("expected decrypted vault value %q, got %q", "test@example.com", decrypted)
 	}
 }
 
