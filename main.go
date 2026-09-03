@@ -15,6 +15,7 @@ import (
 
 	redisdb "MTL_Scheduler_PII_Test/internals/cache"
 	"MTL_Scheduler_PII_Test/internals/database"
+	"MTL_Scheduler_PII_Test/internals/events"
 	"MTL_Scheduler_PII_Test/internals/models"
 	pii "MTL_Scheduler_PII_Test/internals/pii"
 	"MTL_Scheduler_PII_Test/internals/routes"
@@ -35,7 +36,7 @@ func main() {
 		&models.EventEnvelope{}, &models.RunProjection{},
 		&models.Worker{}, &models.WorkerHeartbeat{}, &models.QueueHealth{},
 		&models.Attempt{}, &models.ExecutionChain{}, &models.ScheduleDefinition{},
-		&models.MonitoringAnnotation{}, &models.MonitoringHealth{}, &models.PIIVault{})
+		&models.MonitoringAnnotation{}, &models.MonitoringHealth{}, &models.PIIVault{}, &models.PolicyActivation{})
 
 	r := routes.SetupRouter()
 
@@ -46,9 +47,10 @@ func main() {
 
 	policy, err := pii.LoadPolicy("policies/default.json")
 	if err != nil {
-		log.Fatal("Broken Policy, Stopping App")
+		log.Fatal("Broken Policy, Stopping App", err)
 	}
 	pii.LoadedPolicy = policy
+	events.LogEvent(context.Background(), "system", "pii.policy_activated", "api")
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

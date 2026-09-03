@@ -86,7 +86,7 @@ func Mask(value string, config models.MaskConfig) string {
 	case "PRESERVE_FORMAT":
 		masked_return = suffixReplacer(value, 0, MaskCharacter, true)
 	case "EMAIL":
-		masked_return = PrefixBeforeAt(value, VisibleCharacters, MaskCharacter, false) //i mean depends i guess????
+		masked_return = PrefixBeforeAt(value, VisibleCharacters, MaskCharacter, false, config.DomainMode) //i mean depends i guess????
 	case "FIXED":
 		masked_return = MaskCharacter
 	}

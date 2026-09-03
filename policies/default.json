@@ -4,7 +4,7 @@
   "metadata": {
     "name": "default",
     "version": 1,
-    "checksum": "a163c94f2cbcc75685021834bee99edf4c61dc9524995b866d403213c354dd57"
+    "checksum": "70d852a5aca612203ea7a75b984a86fc6de819930f51b13a4f631ea4d9d7bfea"
   },
   "spec": {
     "evaluationMode": "FIRST_MATCH",
@@ -58,8 +58,26 @@
       {
         "id": "redact-all-default",
         "priority": 0,
-        "detectorIds": ["builtin-email", "builtin-phone", "builtin-ssn", "builtin-creditcard", "builtin-ipaddress"],
+        "detectorIds": ["builtin-phone", "builtin-ssn", "builtin-ipaddress"],
         "action": "REDACT"
+      },
+      {
+        "id": "mask-all-default",
+        "priority": 1,
+        "detectorIds": ["builtin-creditcard"],
+        "action": "MASK"
+      },
+      {
+        "id": "mask-email-domain",
+        "priority": 2,
+        "detectorIds": ["builtin-email"],
+        "action": "MASK",
+        "mask": {
+          "strategy": "EMAIL",
+          "visibleCharacters": 2,
+          "maskCharacter": "*",
+          "domainMode": "MASK"
+        }
       }
     ]
   }

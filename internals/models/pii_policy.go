@@ -40,4 +40,5 @@ type MaskConfig struct {
 	Strategy          string // "KEEP_SUFFIX" (start with just this one)
 	VisibleCharacters int
 	MaskCharacter     string
+	DomainMode        string
 }

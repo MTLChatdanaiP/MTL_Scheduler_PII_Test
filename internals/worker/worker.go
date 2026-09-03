@@ -3,6 +3,8 @@ package worker
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 	"time"
 
 	"MTL_Scheduler_PII_Test/internals/cache"
@@ -269,7 +271,19 @@ func ProcessStream(ctx context.Context, Consumer string, StreamText string, Grou
 	}
 }
 
-const MaxConcurrency = 1 // single-threaded worker: one message read + fully processed before the next
+var MaxConcurrency = getEnvIntOrDefault("MAX_CONCURRENCY", 1)
+
+func getEnvIntOrDefault(EnvValue string, defaultInt int) int {
+	envint := os.Getenv(EnvValue)
+	if envint == "" {
+		return defaultInt
+	}
+	value, err := strconv.Atoi(envint)
+	if err != nil {
+		return defaultInt
+	}
+	return value
+}
 
 // RFC-004 §5 Worker Registration / §4 Worker Identity: worker_id — no separate registration record, heartbeat, or capacity reporting implemented yet
 // RFC-004 §6 Worker Heartbeat: conceptual payload "worker_id, occurred_at, running_attempts, capacity, version" — capacity/version deferred (see models.WorkerHeartbeat)

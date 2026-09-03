@@ -3,6 +3,7 @@ package taskservice
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"context"
@@ -42,6 +43,7 @@ func CreateTask_Direct(ctx context.Context, task models.Task) models.Task {
 	temp := make(map[pii.PIIType]int)
 
 	findings := pii.Detect(task.Payload, pii.LoadedPolicy.Spec.Detectors)
+	evaluated_findings := pii.EvaluatePolicy(findings, pii.LoadedPolicy)
 
 	if len(findings) == 0 {
 		task.ScanStatus = "CLEAN"
@@ -49,20 +51,25 @@ func CreateTask_Direct(ctx context.Context, task models.Task) models.Task {
 		task.ScanStatus = "DETECTED"
 	}
 	// RFC-006 §12 Pre-Execution Scanning: "an implementation may scan... before publishing to Redis... The chosen boundary affects whether raw PII enters Redis." This project scans and redacts before the task is ever saved or published, so raw PII never enters Postgres or the Redis stream
-	for _, value := range findings {
+	for _, evaluated_finding := range evaluated_findings {
 
-		action := pii.ResolveAction(value.DetectorID, pii.LoadedPolicy)
+		value := evaluated_finding.Finding
+		rule := evaluated_finding.Rule
 
 		temp[value.Type] += 1
 
 		// RFC-006 §7 Scan Model — Policy Evaluation stage, REDACT branch: finding is persisted separately (Claim Check) before the payload is rewritten
-		record := models.PIIRecord{JobID: task.JobId, Type: string(value.Type), DetectorID: value.DetectorID, FingerprintValue: pii.Fingerprint(value.Match), Index: temp[value.Type], Source: "JOB_PAYLOAD", Confidence: 1.0, PolicyAction: action}
+		record := models.PIIRecord{JobID: task.JobId, Type: string(value.Type), DetectorID: value.DetectorID, FingerprintValue: pii.Fingerprint(value.Match), Index: temp[value.Type], Source: "JOB_PAYLOAD", Confidence: 1.0, PolicyAction: rule.Action}
 		database.DB.WithContext(ctx).Create(&record)
 		events.LogEvent(ctx, task.JobId, "pii.detected", "api")
 
 		// RFC-006 §14 PII-Safe Logging: payload is rewritten so no downstream system (Redis, worker logs, monitoring) ever sees the raw value
-		if action == "REDACT" {
+		switch rule.Action {
+		case "REDACT":
 			task.Payload = pii.Replacer(task.Payload, value.Match, value.Type, strconv.Itoa(temp[value.Type]))
+		case "MASK":
+			maskedValue := pii.Mask(value.Match, rule.Mask)
+			task.Payload = strings.Replace(task.Payload, value.Match, maskedValue, 1)
 		}
 
 		encryptedMatch, err := pii.Encrypt(value.Match)

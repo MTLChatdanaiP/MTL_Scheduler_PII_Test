@@ -1,15 +1,27 @@
 package pii
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
+	"regexp"
 	"sort"
+	"strings"
+	"time"
 
+	"MTL_Scheduler_PII_Test/internals/database"
+	"MTL_Scheduler_PII_Test/internals/events"
 	"MTL_Scheduler_PII_Test/internals/models"
 )
+
+type EvaluatedFinding struct {
+	Finding Finding
+	Rule    models.PolicyRule // the resolved rule for this finding
+}
 
 var LoadedPolicy models.PIIPolicy
 
@@ -37,7 +49,39 @@ func LoadPolicy(path string) (models.PIIPolicy, error) {
 		return models.PIIPolicy{}, fmt.Errorf("policy checksum mismatch: expected %s, computed %s", policy.Metadata.Checksum, result)
 	}
 
+	problems := ValidatePolicy(policy)
+
+	if len(problems) > 0 {
+		return models.PIIPolicy{}, fmt.Errorf("policy validation failed:\n%s", strings.Join(problems, "\n"))
+	}
+
 	return policy, nil
+}
+
+func ResolveRule(detectorID string, policy models.PIIPolicy) models.PolicyRule {
+	rules := make([]models.PolicyRule, len(policy.Spec.Rules))
+	copy(rules, policy.Spec.Rules)
+
+	sort.Slice(rules, func(i, j int) bool {
+		return rules[i].Priority > rules[j].Priority
+	})
+
+	for _, rule := range rules {
+		for _, id := range rule.DetectorIDs {
+			if id == detectorID {
+				return rule
+			}
+		}
+	}
+
+	return models.PolicyRule{
+		ID:     "default",
+		Action: policy.Spec.Defaults.Action,
+		// NOTE: if Defaults.Action is ever set to "MASK" with no matching rule,
+		// this synthetic default rule has no Mask config, so Mask() would
+		// silently return an empty string. Not currently reachable since
+		// Defaults.Action is "OBSERVE" in the live policy — documented, not fixed.
+	}
 }
 
 func ResolveAction(detectorID string, policy models.PIIPolicy) string {
@@ -46,7 +90,7 @@ func ResolveAction(detectorID string, policy models.PIIPolicy) string {
 	copy(rules, policy.Spec.Rules)
 
 	sort.Slice(rules, func(i, j int) bool {
-		return rules[i].Priority < rules[j].Priority
+		return rules[i].Priority > rules[j].Priority
 	})
 
 	for _, rule := range rules {
@@ -65,20 +109,84 @@ func ValidatePolicy(policy models.PIIPolicy) []string {
 
 	valid_det := make(map[string]bool)
 
-	// TODO 1: build a set of valid detector IDs from policy.Spec.Detectors
-	// (a map[string]bool works well for "does this ID exist" lookups)
+	for _, det := range policy.Spec.Detectors {
+		if !det.Enabled {
+			valid_det[det.ID] = false
+			continue
+		}
 
-	// TODO 2: for each detector, if Type == "REGEX", try regexp.Compile(det.Pattern)
-	// — if it fails, append a problem describing WHICH detector and WHY
+		if det.Type == "REGEX" {
+			_, err := regexp.Compile(det.Pattern)
+			if err != nil {
+				valid_det[det.ID] = false
+				problems = append(problems, fmt.Sprintf("detector %q has invalid regex pattern: %v", det.ID, err))
+				slog.Error("invalid detector pattern, skipping", "detector_id", det.ID, "error", err)
+				continue
+			}
 
-	// TODO 3: for each rule, for each id in rule.DetectorIDs, check that
-	// id actually exists in the set from TODO 1 — if not, append a
-	// problem describing which rule references a nonexistent detector
+			valid_det[det.ID] = true
+		} else {
+			valid_det[det.ID] = true //placeholder since we only have regex, so set to true so i dont have to append error
+		}
+	}
 
-	// TODO 4: check for duplicate rule Priority values — RFC-006's
-	// FIRST_MATCH semantics implicitly assume priority creates a clear
-	// order; two rules sharing the same priority is at least worth
-	// flagging as ambiguous, even if you don't hard-fail on it
+	validPiorities := map[int]bool{}
 
+	for _, rule := range policy.Spec.Rules {
+		for _, detid := range rule.DetectorIDs {
+			value, exists := valid_det[detid]
+			if exists {
+				if !value {
+					problems = append(problems, fmt.Sprintf("rule %q references detector %q, which is disabled or invalid", rule.ID, detid))
+				}
+			} else {
+				problems = append(problems, fmt.Sprintf("rule %q references unknown detector %q", rule.ID, detid))
+			}
+		}
+
+		_, exists := validPiorities[rule.Priority]
+		if exists {
+			problems = append(problems, fmt.Sprintf("rule %q has priority %d, which is already used by another rule", rule.ID, rule.Priority))
+		} else {
+			validPiorities[rule.Priority] = true
+		}
+	}
 	return problems
+}
+
+func EvaluatePolicy(findings []Finding, policy models.PIIPolicy) []EvaluatedFinding {
+	evaluated := []EvaluatedFinding{}
+
+	for _, finding := range findings {
+		rule := ResolveRule(finding.DetectorID, policy)
+		evaluated = append(evaluated, EvaluatedFinding{Finding: finding, Rule: rule})
+	}
+
+	return evaluated
+}
+
+func ActivatePolicy(ctx context.Context, path string) (models.PIIPolicy, error) {
+	policy, err := LoadPolicy(path)
+
+	activation := models.PolicyActivation{
+		ActivatedAt: time.Now().UTC(),
+	}
+
+	if err != nil {
+		activation.Result = "FAILED"
+		activation.FailureReason = err.Error()
+		database.DB.WithContext(ctx).Create(&activation)
+		events.LogEvent(ctx, "system", "pii.policy_reload_failed", "api")
+		return models.PIIPolicy{}, err
+	}
+
+	activation.PolicyName = policy.Metadata.Name
+	activation.PolicyVersion = policy.Metadata.Version
+	activation.Checksum = policy.Metadata.Checksum
+	activation.Result = "SUCCESS"
+	activation.Trigger = "STARTUP"
+	database.DB.WithContext(ctx).Create(&activation)
+	events.LogEvent(ctx, "system", "pii.policy_activated", "api")
+
+	return policy, nil
 }

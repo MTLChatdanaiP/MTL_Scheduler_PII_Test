@@ -16,10 +16,10 @@ type EventEnvelope struct {
 	EventID   string `json:"event_id"`
 	EventType string `json:"event_type"`
 	// RFC-000 §5.4 At-Least-Once Is Assumed: "Every cross-context event requires: event_id, producer identity, timestamp, schema version." — schema_version not yet implemented
-	//SchemaVersion string    `json:"schema_version"`
-	OccurredAt time.Time `json:"occurred_at"`
-	//IngestedAt    time.Time `json:"ingested_at"`
-	Producer string `json:"producer"`
+	SchemaVersion string    `json:"schema_version"`
+	OccurredAt    time.Time `json:"occurred_at"`
+	IngestedAt    time.Time `json:"ingested_at"`
+	Producer      string    `json:"producer"`
 
 	// RFC-001 §4 Domain Model: execution chain / run / attempt lineage fields — commented out, not built (this project models a Task directly rather than Run/Attempt per RFC-001)
 	ExecutionChainID string `json:"execution_chain_id"`

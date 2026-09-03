@@ -1,6 +1,7 @@
 package pii
 
 import (
+	"strings"
 	"unicode"
 )
 
@@ -134,9 +135,12 @@ func countBeforeAt(s string, at string, preserveFormat bool) int {
 	return count
 }
 
-func PrefixBeforeAt(s string, visible int, replacement string, preserveFormat bool) string {
+func PrefixBeforeAt(s string, visible int, replacement string, preserveFormat bool, domainMode string) string {
+	n := countBeforeAt(s, "@", preserveFormat) - visible
 
-	n := countBeforeAt(s, "@", preserveFormat)
+	if n < 0 {
+		n = 0
+	}
 
 	runes := []rune(s)
 	count := 0
@@ -158,5 +162,24 @@ func PrefixBeforeAt(s string, visible int, replacement string, preserveFormat bo
 		count++
 	}
 
-	return string(runes)
+	result := string(runes)
+
+	if domainMode == "MASK" {
+		atIndex := strings.Index(result, "@")
+
+		if atIndex != -1 {
+			domain := result[atIndex+1:]
+
+			domain = suffixReplacer(
+				domain,
+				len([]rune(domain)),
+				replacement,
+				preserveFormat,
+			)
+
+			result = result[:atIndex+1] + domain
+		}
+	}
+
+	return result
 }

@@ -22,6 +22,13 @@ func SetupRouter() *gin.Engine {
 	// RFC-006 §17 Security: gated behind X-Admin-Key — placeholder auth,
 	// not a real permission-scope system yet (see RFC-006 §17 Open Questions)
 	r.GET("/admin/pii-vault/:job_id", handlers.GetDecryptedPII)
+	// RFC-006 §21 Policy Test / Dry Run: evaluate a candidate policy against
+	// sample payload text without touching the database or activating the
+	// policy — lets a policy change be tested before it's trusted with real data
+	r.POST("/pii/dry-run", handlers.PostDryRun)
+
+	// --- Policies---
+	r.GET("/pii/policy", handlers.GetActivePolicy)
 
 	// --- Events & Monitoring ---
 	// RFC-008 §6 Timeline: "The timeline should merge facts from different
