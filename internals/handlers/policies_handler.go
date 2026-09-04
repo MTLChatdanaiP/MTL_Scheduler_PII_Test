@@ -31,7 +31,7 @@ func GetActivePolicy(c *gin.Context) {
 		fmt.Println("no policy activation record found:", ap_err)
 	}
 
-	policy := pii.LoadedPolicy
+	policy := pii.GetLoadedPolicy()
 	metadata := policy.Metadata
 
 	activePolicyReponse.Name = metadata.Name
@@ -41,4 +41,20 @@ func GetActivePolicy(c *gin.Context) {
 	activePolicyReponse.RuleCount = len(policy.Spec.Rules)
 
 	c.JSON(http.StatusOK, activePolicyReponse)
+}
+
+func PostReloadPolicy(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	policy, err := pii.ActivatePolicy(ctx, "policies/default.json", "MANUAL_RELOAD")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"name":     policy.Metadata.Name,
+		"version":  policy.Metadata.Version,
+		"checksum": policy.Metadata.Checksum,
+	})
 }

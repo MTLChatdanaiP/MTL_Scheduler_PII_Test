@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"MTL_Scheduler_PII_Test/internals/database"
@@ -23,7 +24,11 @@ type EvaluatedFinding struct {
 	Rule    models.PolicyRule // the resolved rule for this finding
 }
 
-var LoadedPolicy models.PIIPolicy
+var LoadedPolicy atomic.Pointer[models.PIIPolicy]
+
+func GetLoadedPolicy() models.PIIPolicy {
+	return *LoadedPolicy.Load()
+}
 
 func LoadPolicy(path string) (models.PIIPolicy, error) {
 	data, err := os.ReadFile(path)
@@ -165,7 +170,7 @@ func EvaluatePolicy(findings []Finding, policy models.PIIPolicy) []EvaluatedFind
 	return evaluated
 }
 
-func ActivatePolicy(ctx context.Context, path string) (models.PIIPolicy, error) {
+func ActivatePolicy(ctx context.Context, path string, trigger string) (models.PIIPolicy, error) {
 	policy, err := LoadPolicy(path)
 
 	activation := models.PolicyActivation{
@@ -184,7 +189,7 @@ func ActivatePolicy(ctx context.Context, path string) (models.PIIPolicy, error) 
 	activation.PolicyVersion = policy.Metadata.Version
 	activation.Checksum = policy.Metadata.Checksum
 	activation.Result = "SUCCESS"
-	activation.Trigger = "STARTUP"
+	activation.Trigger = trigger
 	database.DB.WithContext(ctx).Create(&activation)
 	events.LogEvent(ctx, "system", "pii.policy_activated", "api")
 

@@ -9,7 +9,8 @@ import (
 	"MTL_Scheduler_PII_Test/internals/models"
 )
 
-const retentionWindow = 24 * time.Hour // TODO: pick a real value — short for testing, longer for "realistic"
+var retentionWindow = getEnvIntOrDefault("PII_RETENTION_HOURS", 24) //int
+var sweepIntervalHours = getEnvIntOrDefault("RETENTION_SWEEP_INTERVAL_HOURS", 1)
 
 func StartRetentionSweep(ctx context.Context) {
 	for {
@@ -18,8 +19,7 @@ func StartRetentionSweep(ctx context.Context) {
 			return
 		default:
 		}
-
-		cutoff := time.Now().Add(-retentionWindow)
+		cutoff := time.Now().Add(-time.Duration(retentionWindow) * time.Hour)
 
 		if err := database.DB.WithContext(ctx).
 			Where("sampled_at < ?", cutoff).
@@ -39,6 +39,6 @@ func StartRetentionSweep(ctx context.Context) {
 			fmt.Println("Failed to prune old annotation samples:", err)
 		}
 
-		time.Sleep(1 * time.Hour) // retention doesn't need to run often
+		time.Sleep(time.Duration(sweepIntervalHours) * time.Hour) // retention doesn't need to run often
 	}
 }

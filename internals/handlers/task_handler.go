@@ -72,3 +72,16 @@ func ToggleSchedule(c *gin.Context) {
 		"enabled":     def.Enabled,
 	})
 }
+
+func RerunTaskPost(c *gin.Context) {
+	jobId := c.Param("job_id")
+	ctx := c.Request.Context()
+
+	result_reply, err := taskservice.RerunTask(ctx, jobId)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, result_reply)
+}

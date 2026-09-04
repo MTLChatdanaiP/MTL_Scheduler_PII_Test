@@ -13,6 +13,7 @@ func SetupRouter() *gin.Engine {
 	// PRD §10.1 Job Submission
 	r.POST("/tasks", handlers.CreateTask)
 	r.GET("/tasks", handlers.GetTask)
+	r.POST("/runs/:job_id/rerun", handlers.RerunTaskPost)
 
 	// --- PII ---
 	// RFC-008 §5.7 PII Findings: "Raw values should not be shown by default."
@@ -29,6 +30,7 @@ func SetupRouter() *gin.Engine {
 
 	// --- Policies---
 	r.GET("/pii/policy", handlers.GetActivePolicy)
+	r.POST("/pii/policy/reload", handlers.PostReloadPolicy)
 
 	// --- Events & Monitoring ---
 	// RFC-008 §6 Timeline: "The timeline should merge facts from different

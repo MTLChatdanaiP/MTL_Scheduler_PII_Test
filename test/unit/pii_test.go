@@ -19,7 +19,7 @@ func TestDetect(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			findings := pii.Detect(tt.input, pii.LoadedPolicy.Spec.Detectors)
+			findings, _ := pii.Detect(tt.input, pii.GetLoadedPolicy().Spec.Detectors)
 			if len(findings) != tt.wantLen {
 				t.Errorf("Detect(%q) returned %d findings, want %d", tt.input, len(findings), tt.wantLen)
 			}

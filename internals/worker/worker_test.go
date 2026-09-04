@@ -44,7 +44,7 @@ func TestRunHandler(t *testing.T) {
 			task := models.Task{TaskType: tt.taskType}
 
 			start := time.Now()
-			got := runHandler(context.Background(), task)
+			got, _ := runHandler(context.Background(), task)
 			elapsed := time.Since(start)
 
 			if got != tt.want {
@@ -75,7 +75,7 @@ func TestRunHandler_SuccessPath(t *testing.T) {
 			task := models.Task{TaskType: tt.taskType}
 
 			start := time.Now()
-			got := runHandler(context.Background(), task)
+			got, _ := runHandler(context.Background(), task)
 			elapsed := time.Since(start)
 
 			if got != tt.want {

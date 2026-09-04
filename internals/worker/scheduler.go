@@ -55,11 +55,7 @@ func publishDueTasks(ctx context.Context) {
 	}
 
 	for _, task := range tasks {
-		// RFC-001 §5 Run State Model: QUEUED / RFC-001 §9 Commands: MarkRunQueued
-		task.Status = "Queued"
-		database.DB.WithContext(ctx).Save(&task)
-		// RFC-000 §5.3: run.queued-equivalent event
-		events.LogEvent(ctx, task.JobId, "task.queued", "scheduler")
+		events.MarkRunQueued(ctx, &task)
 
 		slog.Info("task queued", "job_id", task.JobId)
 		// RFC-003 §6 Delivery Lifecycle: PUBLISHED stage

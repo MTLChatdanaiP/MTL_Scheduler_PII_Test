@@ -2,6 +2,11 @@ package pii
 
 import "MTL_Scheduler_PII_Test/internals/models"
 
+type DryRunResponse struct {
+	Results         []DryRunResult
+	FailedDetectors []string // detector IDs that failed to compile/run during this dry run
+}
+
 type DryRunResult struct {
 	DetectorID    string
 	PIIType       string
@@ -10,11 +15,11 @@ type DryRunResult struct {
 	MaskedPreview string
 }
 
-func DryRun(payload string, policy models.PIIPolicy) []DryRunResult {
+func DryRun(payload string, policy models.PIIPolicy) DryRunResponse {
 
 	var dryrun_results []DryRunResult
 
-	findings := Detect(payload, policy.Spec.Detectors)
+	findings, failed_dets := Detect(payload, policy.Spec.Detectors)
 	evaluated_findings := EvaluatePolicy(findings, policy)
 
 	for _, evaluated := range evaluated_findings {
@@ -26,5 +31,6 @@ func DryRun(payload string, policy models.PIIPolicy) []DryRunResult {
 		dryrun_results = append(dryrun_results, result)
 	}
 
-	return dryrun_results
+	response := DryRunResponse{Results: dryrun_results, FailedDetectors: failed_dets}
+	return response
 }

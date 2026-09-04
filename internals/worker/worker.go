@@ -38,21 +38,28 @@ var progressChunkCount = 6
 
 // (RFC-001 §14's list: APPLICATION_ERROR, INVALID_INPUT, DEPENDENCY_ERROR,
 // TIMEOUT, WORKER_FAILURE, INFRASTRUCTURE_ERROR, UNKNOWN)
-func runHandler(ctx context.Context, task models.Task) ExecutionOutcome {
+func runHandler(ctx context.Context, task models.Task) (ExecutionOutcome, string) {
 	switch task.TaskType {
-
 	case "fail_retryable":
-		return RetryableFailure
-
+		return RetryableFailure, ""
+	case "fail_invalid_input":
+		return NonRetryableFailure, "INVALID_INPUT"
+	case "fail_dependency":
+		return NonRetryableFailure, "DEPENDENCY_ERROR"
+	case "fail_timeout":
+		return NonRetryableFailure, "TIMEOUT"
 	case "fail_permanent":
-		return NonRetryableFailure
+		return NonRetryableFailure, "APPLICATION_ERROR"
+
+	//MISSING: WORKER_FAILURE        : belongs to a different code path, reclaimer already detects
+	//         INFRASTRUCTURE_ERROR  : real mechanism exists elsewhere, cache.IsUnavailable already classifies elsewhere, just not fed into FailureCategory yet
 
 	default:
 		for i := 0; i < progressChunkCount; i++ {
 			time.Sleep(progressChunkDuration)
 			events.LogEvent(ctx, task.JobId, "task.progress", "worker")
 		}
-		return Success
+		return Success, ""
 	}
 }
 
@@ -61,7 +68,6 @@ func runHandler(ctx context.Context, task models.Task) ExecutionOutcome {
 func ProcessTask(ctx context.Context, JobId string, workerId string) {
 	var task models.Task
 
-	db := database.DB
 	results := database.DB.WithContext(ctx).Where("job_id = ?", JobId).First(&task)
 
 	// RFC-003 §9 At-Least-Once Delivery / RFC-004 §12 Duplicate Execution:
@@ -95,33 +101,19 @@ func ProcessTask(ctx context.Context, JobId string, workerId string) {
 	database.DB.WithContext(ctx).Model(&models.Attempt{}).Where("job_id = ?", JobId).Count(&count)
 
 	// RFC-001 §9 Commands: CreateAttempt + MarkAttemptClaimed (attempt starts at Status: "Claimed")
-	attempt := models.Attempt{
-		AttemptId:     ulid.Make().String(),
-		JobId:         JobId,
-		WorkerId:      workerId,
-		Status:        "Claimed",
-		AttemptNumber: int(count) + 1,
-		ClaimedAt:     time.Now().UTC(),
-	}
-	database.DB.WithContext(ctx).Create(&attempt)
+	attempt := events.MarkAttemptClaimed(ctx, JobId, workerId, int(count)+1)
 
 	atomic.AddInt64(&activeAttempts, 1)
 	AddWorkerCounter(workerId, 1)
 
-	// RFC-001 §5 Run State Model: RUNNING
-	task.Status = "Running"
-	db.WithContext(ctx).Save(&task)
-	// RFC-000 §5.3: attempt.started-equivalent event
-	events.LogEvent(ctx, task.JobId, "task.started", "worker")
+	events.MarkRunRunning(ctx, &task)
 
 	// RFC-001 §9 Commands: MarkAttemptStarted
-	attempt.Status = "Started"
-	attempt.StartedAt = time.Now().UTC()
-	database.DB.WithContext(ctx).Save(&attempt)
+	events.MarkAttemptStarted(ctx, &attempt)
 	//change note status from "Pending" to "Running"
 	slog.Info("task started", "worker_id", workerId, "job_id", JobId)
 
-	outcome := runHandler(ctx, task) //process the task if tasktype allows it
+	outcome, category := runHandler(ctx, task) //process the task if tasktype allows it
 
 	switch outcome {
 
@@ -131,9 +123,7 @@ func ProcessTask(ctx context.Context, JobId string, workerId string) {
 	// Completed status.
 	// RFC-001 §9 Commands: MarkAttemptSucceeded + MarkRunSucceeded
 	case Success:
-		attempt.Status = "Succeeded"
-		attempt.FinishedAt = time.Now().UTC()
-		db.WithContext(ctx).Save(&attempt)
+		events.MarkAttemptSucceeded(ctx, &attempt)
 
 		// RFC-001 §8 Invariant 11: only mark the run SUCCEEDED after confirming
 		// the attempt's success was actually persisted — re-fetch and check
@@ -144,9 +134,7 @@ func ProcessTask(ctx context.Context, JobId string, workerId string) {
 			return
 		}
 
-		task.Status = "Completed"
-		task.FinishedAt = time.Now().UTC()
-		db.WithContext(ctx).Save(&task)
+		events.MarkRunCompleted(ctx, &task)
 
 		// RFC-000 §5.3: attempt.succeeded-equivalent event
 		events.LogEvent(ctx, task.JobId, "task.completed", "worker")
@@ -160,17 +148,9 @@ func ProcessTask(ctx context.Context, JobId string, workerId string) {
 			return
 		}
 
-		// the FAILED run stays terminal — RFC-001 §5: "A failed parent run
-		// remains terminal after its retry child is created"
-		task.Status = "Failed"
-		task.FinishedAt = time.Now().UTC()
-		db.WithContext(ctx).Save(&task)
-
-		attempt.Status = "Abandoned"
-		attempt.FinishedAt = time.Now().UTC()
-		database.DB.WithContext(ctx).Save(&attempt)
-
-		events.LogEvent(ctx, task.JobId, "task.retry_scheduled", "worker")
+		//RFC-001 §5: "A failed parent run remains terminal after its retry child is created"
+		events.MarkRunRetryableFailure(ctx, &task)
+		events.MarkAttemptAbandoned(ctx, &attempt)
 
 		// RFC-001 §7 Retry Lineage: a retry creates a NEW run — new JobId, same
 		// execution_chain_id, parent_run_id set to the failed run. The failed
@@ -192,15 +172,8 @@ func ProcessTask(ctx context.Context, JobId string, workerId string) {
 		events.LogEvent(ctx, retryTask.JobId, "task.created", "worker")
 	// RFC-001 §9 Commands: MarkAttemptFailed + MarkRunFailed
 	case NonRetryableFailure:
-		task.Status = "Failed"
-		db.WithContext(ctx).Save(&task)
-
-		attempt.Status = "Failed"
-		attempt.FinishedAt = time.Now().UTC()
-		attempt.FailureCategory = "APPLICATION_ERROR"
-		db.WithContext(ctx).Save(&attempt)
-
-		events.LogEvent(ctx, task.JobId, "task.failed", "worker")
+		events.MarkAttemptFailed(ctx, &attempt, category)
+		events.MarkRunFailed(ctx, &task)
 	}
 
 	atomic.AddInt64(&activeAttempts, -1)

@@ -42,10 +42,12 @@ func CreateTask_Direct(ctx context.Context, task models.Task) models.Task {
 
 	temp := make(map[pii.PIIType]int)
 
-	findings := pii.Detect(task.Payload, pii.LoadedPolicy.Spec.Detectors)
-	evaluated_findings := pii.EvaluatePolicy(findings, pii.LoadedPolicy)
+	findings, failedDetectors := pii.Detect(task.Payload, pii.GetLoadedPolicy().Spec.Detectors)
+	evaluated_findings := pii.EvaluatePolicy(findings, pii.GetLoadedPolicy())
 
-	if len(findings) == 0 {
+	if len(failedDetectors) > 0 {
+		task.ScanStatus = "SCAN_ERROR"
+	} else if len(findings) == 0 {
 		task.ScanStatus = "CLEAN"
 	} else {
 		task.ScanStatus = "DETECTED"
@@ -90,7 +92,10 @@ func CreateTask_Direct(ctx context.Context, task models.Task) models.Task {
 
 	// RFC-000 §5.3 Domain Events Are Facts: run.created-equivalent event
 	database.DB.WithContext(ctx).Create(&task)
-	events.LogEvent(ctx, task.JobId, "task.created", "api")
-
+	if task.SourceRunId == "" {
+		events.LogEvent(ctx, task.JobId, "task.created", "api")
+	} else {
+		events.LogEvent(ctx, task.JobId, "task.rerun_created", "api")
+	}
 	return task
 }

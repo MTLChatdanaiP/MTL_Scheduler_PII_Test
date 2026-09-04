@@ -31,9 +31,10 @@ var encryptKey = []byte(os.Getenv("PII_ENCR_KEY"))
 // RFC-006 §7 Scan Pipeline: Content -> Normalizer -> Detector Set -> Candidate Findings -> Policy Evaluation. This function implements the Detector Set stage; there is no Normalizer stage yet
 // RFC-006 §5 Detector Definitions: patterns are no longer hardcoded in Go — they are compiled at call-time from the loaded PIIPolicy's detector list, matching the RFC's requirement that detection be policy-driven rather than baked into application code
 // RFC-006 §8 Scan Sources: this only scans JOB_PAYLOAD/TASK_NAME-equivalent text passed in as a string, not metadata/results/logs
-func Detect(text string, detectors []models.DetectorDefinition) []Finding {
+func Detect(text string, detectors []models.DetectorDefinition) ([]Finding, []string) {
 
 	var findings []Finding
+	var failed_det []string
 
 	for _, det := range detectors {
 		if !det.Enabled {
@@ -42,6 +43,7 @@ func Detect(text string, detectors []models.DetectorDefinition) []Finding {
 
 		compiled_pattern, err := regexp.Compile(det.Pattern)
 		if err != nil {
+			failed_det = append(failed_det, det.ID)
 			slog.Error("invalid detector pattern, skipping", "detector_id", det.ID, "error", err)
 			continue
 		}
@@ -51,7 +53,7 @@ func Detect(text string, detectors []models.DetectorDefinition) []Finding {
 		}
 	}
 
-	return findings
+	return findings, failed_det
 }
 
 // RFC-006 §11 Actions — REDACT: "Replace sensitive content with a marker." The action itself now comes from

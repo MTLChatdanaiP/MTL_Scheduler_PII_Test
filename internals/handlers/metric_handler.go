@@ -29,7 +29,7 @@ func GetMetrics(c *gin.Context) {
 		First(&queueDepth)
 
 	var workerOnline int64
-	database.DB.WithContext(ctx).Model(&models.Worker{}).
+	database.DB.WithContext(ctx).Model(&models.WorkerHeartbeat{}).
 		Where("occurred_at > ?", time.Now().Add(-1*time.Minute)).
 		Distinct("worker_id").
 		Count(&workerOnline)

@@ -15,7 +15,6 @@ import (
 
 	redisdb "MTL_Scheduler_PII_Test/internals/cache"
 	"MTL_Scheduler_PII_Test/internals/database"
-	"MTL_Scheduler_PII_Test/internals/events"
 	"MTL_Scheduler_PII_Test/internals/models"
 	pii "MTL_Scheduler_PII_Test/internals/pii"
 	"MTL_Scheduler_PII_Test/internals/routes"
@@ -45,12 +44,11 @@ func main() {
 		Handler: r, // your gin.Engine — think about why Gin's Engine can be used as a Handler here (hint: what interface must a type satisfy to be usable as http.Server's Handler?)
 	}
 
-	policy, err := pii.LoadPolicy("policies/default.json")
+	policy, err := pii.ActivatePolicy(context.Background(), "policies/default.json", "STARTUP")
 	if err != nil {
 		log.Fatal("Broken Policy, Stopping App", err)
 	}
-	pii.LoadedPolicy = policy
-	events.LogEvent(context.Background(), "system", "pii.policy_activated", "api")
+	pii.LoadedPolicy.Store(&policy)
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
