@@ -4,7 +4,7 @@
   "metadata": {
     "name": "default",
     "version": 1,
-    "checksum": "70d852a5aca612203ea7a75b984a86fc6de819930f51b13a4f631ea4d9d7bfea"
+    "checksum": "fe73d9114655c6e25e484de2a96180e75482fd1de239bf200f1d9d6ab5807965"
   },
   "spec": {
     "evaluationMode": "FIRST_MATCH",
@@ -59,18 +59,33 @@
         "id": "redact-all-default",
         "priority": 0,
         "detectorIds": ["builtin-phone", "builtin-ssn", "builtin-ipaddress"],
+        "match": {
+          "sources": ["JOB_PAYLOAD", "TASK_NAME"],
+          "piiTypes": ["Phone", "SSN", "IPAddress"],
+          "minimumConfidence": 0.0
+        },
         "action": "REDACT"
       },
       {
         "id": "mask-all-default",
         "priority": 1,
         "detectorIds": ["builtin-creditcard"],
+        "match": {
+          "sources": ["JOB_PAYLOAD", "TASK_NAME"],
+          "piiTypes": ["CreditCard"],
+          "minimumConfidence": 0.0
+        },
         "action": "MASK"
       },
       {
         "id": "mask-email-domain",
         "priority": 2,
         "detectorIds": ["builtin-email"],
+        "match": {
+          "sources": ["JOB_PAYLOAD", "TASK_NAME"],
+          "piiTypes": ["Email"],
+          "minimumConfidence": 0.0
+        },
         "action": "MASK",
         "mask": {
           "strategy": "EMAIL",
@@ -78,6 +93,15 @@
           "maskCharacter": "*",
           "domainMode": "MASK"
         }
+      },
+      {
+        "id": "redact-nested-phone",
+        "priority": 3,
+        "detectorIds": ["builtin-phone"],
+        "match": {
+          "fieldPaths": ["customers[*].phone"]
+        },
+        "action": "REDACT"
       }
     ]
   }

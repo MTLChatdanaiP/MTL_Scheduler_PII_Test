@@ -290,6 +290,18 @@ func SetupWorker(ctx context.Context, worker_id string) {
 			return
 		default:
 		}
+
+		current, ok := GetWorkerCounter(worker_id)
+		if !ok {
+			slog.Error("no counter registered for worker, refusing to claim work until this is resolved", "worker_id", worker_id)
+			time.Sleep(999 * time.Second)
+			continue
+		}
+		if current >= int64(MaxConcurrency) {
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
 		Streams := ReadStream(ctx, worker_id, TaskStream, group)
 		if Streams != nil {
 			for _, s := range Streams {

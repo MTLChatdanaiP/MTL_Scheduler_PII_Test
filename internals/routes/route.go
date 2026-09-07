@@ -28,6 +28,8 @@ func SetupRouter() *gin.Engine {
 	// policy — lets a policy change be tested before it's trusted with real data
 	r.POST("/pii/dry-run", handlers.PostDryRun)
 
+	r.GET("/pii/search", handlers.SearchPII)
+
 	// --- Policies---
 	r.GET("/pii/policy", handlers.GetActivePolicy)
 	r.POST("/pii/policy/reload", handlers.PostReloadPolicy)

@@ -42,18 +42,25 @@ func CreateTask_Direct(ctx context.Context, task models.Task) models.Task {
 
 	temp := make(map[pii.PIIType]int)
 
-	findings, failedDetectors := pii.Detect(task.Payload, pii.GetLoadedPolicy().Spec.Detectors)
-	evaluated_findings := pii.EvaluatePolicy(findings, pii.GetLoadedPolicy())
+	policy := pii.GetLoadedPolicy()
+
+	evaluatedFindings, failedDetectors, ok := pii.DetectJSON(task.Payload, policy.Spec.Detectors, policy, "JOB_PAYLOAD", task.TaskType)
+
+	if !ok {
+		findings, failed := pii.Detect(task.Payload, policy.Spec.Detectors)
+		evaluatedFindings = pii.EvaluatePolicy(findings, policy, "JOB_PAYLOAD", task.TaskType)
+		failedDetectors = failed
+	}
 
 	if len(failedDetectors) > 0 {
 		task.ScanStatus = "SCAN_ERROR"
-	} else if len(findings) == 0 {
+	} else if len(evaluatedFindings) == 0 {
 		task.ScanStatus = "CLEAN"
 	} else {
 		task.ScanStatus = "DETECTED"
 	}
 	// RFC-006 §12 Pre-Execution Scanning: "an implementation may scan... before publishing to Redis... The chosen boundary affects whether raw PII enters Redis." This project scans and redacts before the task is ever saved or published, so raw PII never enters Postgres or the Redis stream
-	for _, evaluated_finding := range evaluated_findings {
+	for _, evaluated_finding := range evaluatedFindings {
 
 		value := evaluated_finding.Finding
 		rule := evaluated_finding.Rule

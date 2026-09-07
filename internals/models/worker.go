@@ -14,6 +14,7 @@ type Worker struct {
 	// RFC-004 §4 Worker Identity: distinguishes this specific process run from other runs of the same logical worker
 	InstanceId string `json:"instance_id"`
 
-	Hostname  string    `json:"hostname"`
-	StartedAt time.Time `json:"started_at"`
+	Hostname           string    `json:"hostname"`
+	StartedAt          time.Time `json:"started_at"`
+	ConfiguredCapacity int
 }

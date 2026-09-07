@@ -28,10 +28,19 @@ type DetectorDefinition struct {
 	MinimumConfidence float64
 }
 
+type MatchConditions struct {
+	Sources           []string
+	JobTypes          []string
+	PIITypes          []string
+	FieldPaths        []string // unreachable until §10 exists
+	MinimumConfidence float64
+}
+
 type PolicyRule struct {
 	ID          string
 	Priority    int
 	DetectorIDs []string
+	Match       MatchConditions
 	Action      string
 	Mask        MaskConfig
 }

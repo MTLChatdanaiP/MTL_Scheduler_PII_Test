@@ -6,12 +6,9 @@ import (
 	"MTL_Scheduler_PII_Test/internals/models"
 	"MTL_Scheduler_PII_Test/internals/taskservice"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
-
-	"github.com/oklog/ulid/v2"
 )
 
 // RFC-002 §7 Scheduling Flow: "Determine occurrence due -> Create occurrence -> Request Job Run creation -> Associate run_id with occurrence." This project collapses that into a single poll loop over Task rows
@@ -34,7 +31,6 @@ func StartScheduler(ctx context.Context, scheduler_id string) {
 
 		publishDueTasks(ctx)
 		fireRecurringSchedules(ctx)
-		checkOverdueSchedules(ctx)
 
 		time.Sleep(schedulerInterval)
 	}
@@ -90,46 +86,5 @@ func fireRecurringSchedules(ctx context.Context) {
 		fmt.Println("idk log results here IG", result)
 
 		database.DB.WithContext(ctx).Save(&def)
-	}
-}
-
-func checkOverdueSchedules(ctx context.Context) {
-	var overdueSchedules []models.ScheduleDefinition
-	cutoff := time.Now().UTC().Add(-missedOccurrenceThreshold)
-
-	overdue_err := database.DB.WithContext(ctx).
-		Where("enabled = ?", true).
-		Where("next_run_at < ?", cutoff).
-		Find(&overdueSchedules).Error
-
-	if overdue_err != nil {
-		fmt.Println("No overdued:", overdue_err)
-		return
-	}
-
-	for _, sched := range overdueSchedules {
-		var existing models.MonitoringAnnotation
-		notFoundErr := database.DB.WithContext(ctx).
-			Where("subject_id = ? AND type = ? AND resolved_at IS NULL", sched.ScheduleId, "SCHEDULE_MISSED").
-			First(&existing).Error
-
-		if notFoundErr != nil {
-			evidenceMap := map[string]interface{}{
-				"next_run_at": sched.NextRunAt,
-			}
-			evidenceJSON, _ := json.Marshal(evidenceMap)
-
-			annotation := models.MonitoringAnnotation{
-				AnnotationID: ulid.Make().String(),
-				Type:         "SCHEDULE_MISSED",
-				SubjectType:  "SCHEDULE",
-				SubjectID:    sched.ScheduleId,
-				DerivedAt:    time.Now().UTC(),
-				Evidence:     string(evidenceJSON),
-			}
-			database.DB.WithContext(ctx).Create(&annotation)
-		}
-
-		slog.Warn("schedule occurrence missed", "schedule_id", sched.ScheduleId, "next_run_at", sched.NextRunAt)
 	}
 }

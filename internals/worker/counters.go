@@ -31,6 +31,15 @@ func AddWorkerCounter(workerId string, increment int64) {
 	}
 }
 
+func GetWorkerCounter(workerId string) (int64, bool) {
+	value, ok := workerCounters.Load(workerId)
+	if !ok {
+		return 0, false
+	}
+	counter := value.(*atomic.Int64)
+	return counter.Load(), true
+}
+
 // RFC-004 §10 Graceful Shutdown: intended cleanup step on worker shutdown — not yet wired to a shutdown signal (§10 remains open)
 func DeleteWorkerCounter(workerId string) {
 	workerCounters.Delete(workerId)

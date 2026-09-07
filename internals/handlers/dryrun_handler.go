@@ -12,6 +12,8 @@ import (
 type DryRunRequest struct {
 	Payload string           // the sample text to test against
 	Policy  models.PIIPolicy // let the caller pass a CANDIDATE policy, not just the live one
+	Source  string           // e.g. "JOB_PAYLOAD" — let the caller simulate this
+	JobType string           // e.g. "dummy" — let the caller simulate a specific task type
 }
 
 func PostDryRun(c *gin.Context) {
@@ -24,6 +26,10 @@ func PostDryRun(c *gin.Context) {
 		return
 	}
 
-	results := pii.DryRun(req.Payload, req.Policy)
+	if req.Source == "" { //for now
+		req.Source = "JOB_PAYLOAD"
+	}
+
+	results := pii.DryRun(req.Payload, req.Policy, req.Source, req.JobType)
 	c.JSON(http.StatusOK, results)
 }

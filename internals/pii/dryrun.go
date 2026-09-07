@@ -15,12 +15,12 @@ type DryRunResult struct {
 	MaskedPreview string
 }
 
-func DryRun(payload string, policy models.PIIPolicy) DryRunResponse {
+func DryRun(payload string, policy models.PIIPolicy, source string, jobType string) DryRunResponse {
 
 	var dryrun_results []DryRunResult
 
 	findings, failed_dets := Detect(payload, policy.Spec.Detectors)
-	evaluated_findings := EvaluatePolicy(findings, policy)
+	evaluated_findings := EvaluatePolicy(findings, policy, source, jobType)
 
 	for _, evaluated := range evaluated_findings {
 		finding := evaluated.Finding
