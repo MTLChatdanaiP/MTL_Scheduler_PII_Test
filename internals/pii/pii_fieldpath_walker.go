@@ -59,7 +59,7 @@ func fieldPathMatches(pattern string, concretePath string) bool {
 	return true
 }
 
-func walkJSON(prefix string, data interface{}, scan func(path string, value string)) {
+func walkJSON(prefix string, data interface{}, scan func(path string, value string)) { //Detection only
 	switch v := data.(type) {
 	case map[string]interface{}:
 		for key, val := range v {

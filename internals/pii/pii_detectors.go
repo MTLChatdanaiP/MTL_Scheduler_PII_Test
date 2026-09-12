@@ -15,12 +15,17 @@ type Finding struct {
 	Match      string
 	DetectorID string
 	FieldPath  string
+	Start      int
+	End        int
+	Confidence int
 }
 
 // RFC-006 §7 Scan Pipeline: Content -> Normalizer -> Detector Set -> Candidate Findings -> Policy Evaluation. This function implements the Detector Set stage; there is no Normalizer stage yet
 // RFC-006 §5 Detector Definitions: patterns are no longer hardcoded in Go — they are compiled at call-time from the loaded PIIPolicy's detector list, matching the RFC's requirement that detection be policy-driven rather than baked into application code
 // RFC-006 §8 Scan Sources: this only scans JOB_PAYLOAD/TASK_NAME-equivalent text passed in as a string, not metadata/results/logs
 func Detect(text string, detectors []models.DetectorDefinition) ([]Finding, []string) {
+
+	text = normalizeText(text)
 
 	var findings []Finding
 	var failed_det []string
@@ -37,8 +42,24 @@ func Detect(text string, detectors []models.DetectorDefinition) ([]Finding, []st
 			continue
 		}
 
-		for _, m := range compiled_pattern.FindAllString(text, -1) {
-			findings = append(findings, Finding{Type: PIIType(det.PIIType), Match: m, DetectorID: det.ID})
+		for _, m := range compiled_pattern.FindAllStringIndex(text, -1) {
+
+			start := m[0]
+			end := m[1]
+
+			match := text[start:end]
+
+			if det.PIIType == "CreditCard" && !isValidLuhn(match) {
+				continue // skip this match, it's not a real card number
+			}
+
+			findings = append(findings, Finding{
+				Type:       PIIType(det.PIIType),
+				Match:      match,
+				DetectorID: det.ID,
+				Start:      start,
+				End:        end,
+			})
 		}
 	}
 
@@ -75,5 +96,6 @@ func DetectJSON(jsonText string, detectors []models.DetectorDefinition, policy m
 		}
 	})
 
+	println()
 	return evaluated, failedDetectors, true
 }

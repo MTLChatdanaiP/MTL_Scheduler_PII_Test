@@ -1,13 +1,13 @@
 name: Run Tests
- 
+
 on:
   push:
   pull_request:
- 
+
 jobs:
   test:
     runs-on: ubuntu-latest
- 
+
     services:
       postgres:
         image: postgres:16
@@ -22,7 +22,7 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
- 
+
       redis:
         image: redis:7
         ports:
@@ -32,16 +32,24 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
- 
+
     steps:
       - name: Check out code
         uses: actions/checkout@v4
- 
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.25'
- 
+
+      # PII_FINGERPRINT_KEY and PII_ENCR_KEY were previously absent. That did not
+      # fail, because Encrypt does sha256.Sum256([]byte(key)) -- an empty key
+      # still yields a valid 32-byte AES key, and Encrypt/Decrypt agreed with
+      # each other. Setting them explicitly matters anyway: a fingerprint
+      # computed against an empty key does not match one computed locally, so
+      # any test comparing a stored fingerprint would behave differently in CI.
+      #
+      # ADMIN_KEY is deliberately gone -- RFC-006 §33 retired it.
       - name: Create .env for tests
         run: |
           echo "DB_HOST=localhost" >> .env
@@ -50,23 +58,89 @@ jobs:
           echo "DB_PASSWORD=password" >> .env
           echo "DB_NAME=mydb_two" >> .env
           echo "REDIS_ADDR=localhost:6379" >> .env
- 
+          echo "PII_FINGERPRINT_KEY=ci-fingerprint-key" >> .env
+          echo "PII_ENCR_KEY=ci-encryption-key" >> .env
+          echo "MAX_CONCURRENCY=5" >> .env
+          echo "PII_RETENTION_HOURS=24" >> .env
+          echo "RETENTION_SWEEP_INTERVAL_HOURS=1" >> .env
+          echo "ALERT_WEBHOOK_URL" >> .env 
+
+      # Startup calls auth.LoadPrincipals and log.Fatal's if the file is missing.
+      # Writing it here rather than relying on the committed one means CI keeps
+      # working whether or not internals/auth/config.json is gitignored -- and it
+      # keeps the CI key distinct from whatever is in the developer's file.
+      #
+      # The scope list must cover every scope any test exercises. A missing scope
+      # surfaces as a 403 in an e2e test, which reads like a broken endpoint
+      # rather than a missing config entry.
+      - name: Create auth config for tests
+        run: |
+          mkdir -p internals/auth
+          cat > internals/auth/config.json << 'EOF'
+          [
+            {
+              "name": "ci-test",
+              "key": "ci-test-key",
+              "scopes": [
+                "pii.findings.read",
+                "pii.policy.read",
+                "pii.policy.validate",
+                "pii.policy.manage",
+                "pii.policy.activate",
+                "pii.masked_value.read",
+                "pii.raw_value.read",
+                "alerts.read",
+                "alerts.acknowledge",
+                "alerts.rules.reload"
+              ]
+            }
+          ]
+          EOF
+
+      # Fail early and readably if a config file the app needs at startup is
+      # missing from the repo. Without this, a missing rules.json shows up much
+      # later as "every e2e test got connection refused", because the app
+      # log.Fatal'd, `sleep 15` passed anyway, and nothing checked.
+      - name: Verify startup config files exist
+        run: |
+          test -f policies/default.json || { echo "MISSING: policies/default.json"; exit 1; }
+          test -f internals/alerting/rules.json || { echo "MISSING: internals/alerting/rules.json"; exit 1; }
+
+      # go vet catches a real class of bug the compiler does not, and several of
+      # them have shown up in this project already: unreachable code, suspicious
+      # printf verbs, and struct tags that do not parse.
+      - name: Vet
+        run: go vet ./...
+
       - name: Run unit tests
         run: go test -timeout 300s ./test/unit/...
- 
+
       - name: Run integration tests
         run: go test -timeout 300s ./test/integration/...
- 
+
       - name: Run internal tests
         run: go test -timeout 300s ./internals/...
- 
+
       - name: Build the app
         run: go build -o app .
- 
+
+      # Explicitly check the app is actually serving before running e2e. The old
+      # `sleep 15` assumed it -- if startup failed, every e2e test failed with a
+      # connection error and the real cause (a log.Fatal on a bad config file)
+      # was buried in output nobody reads.
       - name: Start the app in the background
         run: |
-          ./app &
-          sleep 15
+          ./app > app.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8080/metrics > /dev/null 2>&1; then
+              echo "app is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "app failed to start within 30s. Log:"
+          cat app.log
+          exit 1
         env:
           DB_HOST: localhost
           DB_PORT: 5432
@@ -74,10 +148,26 @@ jobs:
           DB_PASSWORD: password
           DB_NAME: mydb_two
           REDIS_ADDR: localhost:6379
- 
-      - name: Run e2e tests
-        run: >-
-          go test -timeout 300s -run
-          "TestCreateTask_RedactsPII|TestFullTaskLifecycle_EventsInOrder|TestRetryChain_ShowsTwoLinkedRuns|TestDebugReset_ClearsAllTables|TestMetrics_ReflectsRealCounts"
-          ./test/e2e/...
 
+      # CHANGED FROM AN INCLUDE LIST TO AN EXCLUDE LIST.
+      #
+      # The old form named five tests explicitly, so any new e2e test silently
+      # never ran -- it could never fail CI because it was never executed.
+      # Inverting it means new tests are picked up automatically, and only the
+      # one test that genuinely must not run here stays excluded:
+      # TestGracefulShutdown_InFlightTaskCompletes shuts the app down, which
+      # would break every test after it.
+      # E2E_API_KEY must match the key written into internals/auth/config.json
+      # above. The e2e helpers attach it to every request; scoped routes return
+      # 403 without it, which surfaces as a confusing assertion failure rather
+      # than an auth error.
+      - name: Run e2e tests
+        run: go test -timeout 300s -skip 'TestGracefulShutdown' ./test/e2e/...
+        env:
+          E2E_API_KEY: ci-test-key
+
+      # The app's own stdout is the only place a startup or sweep failure is
+      # visible. Printing it on failure turns "e2e failed" into an actual cause.
+      - name: Show app log on failure
+        if: failure()
+        run: cat app.log || true

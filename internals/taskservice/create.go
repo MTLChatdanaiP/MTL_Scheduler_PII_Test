@@ -2,8 +2,8 @@ package taskservice
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"context"
@@ -52,6 +52,8 @@ func CreateTask_Direct(ctx context.Context, task models.Task) models.Task {
 		failedDetectors = failed
 	}
 
+	evaluatedFindings = pii.ResolveOverlaps(evaluatedFindings)
+
 	if len(failedDetectors) > 0 {
 		task.ScanStatus = "SCAN_ERROR"
 	} else if len(evaluatedFindings) == 0 {
@@ -59,6 +61,9 @@ func CreateTask_Direct(ctx context.Context, task models.Task) models.Task {
 	} else {
 		task.ScanStatus = "DETECTED"
 	}
+
+	var transformations []pii.Transformation
+
 	// RFC-006 §12 Pre-Execution Scanning: "an implementation may scan... before publishing to Redis... The chosen boundary affects whether raw PII enters Redis." This project scans and redacts before the task is ever saved or published, so raw PII never enters Postgres or the Redis stream
 	for _, evaluated_finding := range evaluatedFindings {
 
@@ -68,17 +73,18 @@ func CreateTask_Direct(ctx context.Context, task models.Task) models.Task {
 		temp[value.Type] += 1
 
 		// RFC-006 §7 Scan Model — Policy Evaluation stage, REDACT branch: finding is persisted separately (Claim Check) before the payload is rewritten
-		record := models.PIIRecord{JobID: task.JobId, Type: string(value.Type), DetectorID: value.DetectorID, FingerprintValue: pii.Fingerprint(value.Match), Index: temp[value.Type], Source: "JOB_PAYLOAD", Confidence: 1.0, PolicyAction: rule.Action}
+		record := models.PIIRecord{JobID: task.JobId, Type: string(value.Type), DetectorID: value.DetectorID, FingerprintValue: pii.Fingerprint(value.Match), Index: temp[value.Type], Source: "JOB_PAYLOAD", Confidence: 1.0, PolicyAction: rule.Action.Type}
 		database.DB.WithContext(ctx).Create(&record)
 		events.LogEvent(ctx, task.JobId, "pii.detected", "api")
 
 		// RFC-006 §14 PII-Safe Logging: payload is rewritten so no downstream system (Redis, worker logs, monitoring) ever sees the raw value
-		switch rule.Action {
+		switch rule.Action.Type {
 		case "REDACT":
-			task.Payload = pii.Replacer(task.Payload, value.Match, value.Type, strconv.Itoa(temp[value.Type]))
+			replacement := "[" + string(value.Type) + "-" + strconv.Itoa(temp[value.Type]) + "]"
+			transformations = append(transformations, pii.Transformation{Start: value.Start, End: value.End, Replacement: replacement})
 		case "MASK":
-			maskedValue := pii.Mask(value.Match, rule.Mask)
-			task.Payload = strings.Replace(task.Payload, value.Match, maskedValue, 1)
+			maskedValue := pii.Mask(value.Match, rule.Action.Mask)
+			transformations = append(transformations, pii.Transformation{Start: value.Start, End: value.End, Replacement: maskedValue})
 		}
 
 		encryptedMatch, err := pii.Encrypt(value.Match)
@@ -90,6 +96,20 @@ func CreateTask_Direct(ctx context.Context, task models.Task) models.Task {
 		vault := models.PIIVault{JobId: task.JobId, Type: string(value.Type), Index: temp[value.Type], EncryptedValue: encryptedMatch}
 		database.DB.WithContext(ctx).Create(&vault)
 	}
+
+	if ok {
+		task.Payload = pii.ApplyFindingsToJSON(
+			task.Payload,
+			evaluatedFindings,
+		)
+	} else {
+		sort.Slice(transformations, func(i, j int) bool {
+			return transformations[i].Start >
+				transformations[j].Start
+		})
+		task.Payload = pii.ApplyTransformations(task.Payload, transformations)
+	}
+
 	fmt.Println("Final: ", task.Payload)
 
 	// RFC-002 §12 Timezone Requirements / §4 Domain Model (expected_at): normalizes an unset or past-due RunAt to "now", meaning immediate tasks flow through the same scheduler poll loop as scheduled ones (RFC-002 §7 Scheduling Flow) rather than publishing directly here

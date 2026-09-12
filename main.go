@@ -13,6 +13,8 @@ import (
 
 	"github.com/joho/godotenv"
 
+	alerts "MTL_Scheduler_PII_Test/internals/alerting"
+	"MTL_Scheduler_PII_Test/internals/auth"
 	redisdb "MTL_Scheduler_PII_Test/internals/cache"
 	"MTL_Scheduler_PII_Test/internals/database"
 	"MTL_Scheduler_PII_Test/internals/models"
@@ -22,33 +24,39 @@ import (
 	"MTL_Scheduler_PII_Test/internals/worker"
 )
 
-const stream = "jobs:experiment"
-
 func main() {
 	godotenv.Load()
 
 	database.ConnectDatabase()
 	redisdb.ConnectRedis()
 
+	if _, err := pii.ActivatePolicy(context.Background(), "policies/default.json", "STARTUP", "system"); err != nil {
+		log.Fatal("Broken Policy, Stopping App", err)
+	}
+
+	if _, err := alerts.ActivateRules(context.Background(), "internals/alerting/rules.json", "system"); err != nil {
+		log.Fatal("Broken Alerts Rules, Stopping App", err)
+	}
+
+	if err := auth.LoadPrincipals("internals/auth/config.json"); err != nil {
+		log.Fatal(err)
+	}
+
 	database.DB.AutoMigrate(
 		&models.Task{}, &models.PIIRecord{},
 		&models.EventEnvelope{}, &models.RunProjection{},
 		&models.Worker{}, &models.WorkerHeartbeat{}, &models.QueueHealth{},
 		&models.Attempt{}, &models.ExecutionChain{}, &models.ScheduleDefinition{},
-		&models.MonitoringAnnotation{}, &models.MonitoringHealth{}, &models.PIIVault{}, &models.PolicyActivation{})
+		&models.MonitoringAnnotation{}, &models.MonitoringHealth{}, &models.PIIVault{}, &models.PolicyActivation{},
+		&models.Alert{}, &models.Notification{},
+	)
 
 	r := routes.SetupRouter()
 
 	srv := &http.Server{
 		Addr:    ":8080",
-		Handler: r, // your gin.Engine — think about why Gin's Engine can be used as a Handler here (hint: what interface must a type satisfy to be usable as http.Server's Handler?)
+		Handler: r,
 	}
-
-	policy, err := pii.ActivatePolicy(context.Background(), "policies/default.json", "STARTUP")
-	if err != nil {
-		log.Fatal("Broken Policy, Stopping App", err)
-	}
-	pii.LoadedPolicy.Store(&policy)
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -59,15 +67,21 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	if url := os.Getenv("ALERT_WEBHOOK_URL"); url != "" {
+		adapter := alerts.NewWebhookAdapter(url)
+		alerts.NotificationAdapters[adapter.Channel()] = adapter
+	}
+
 	var wg sync.WaitGroup
 
-	wg.Add(5)
+	wg.Add(6)
 
 	go func() { defer wg.Done(); worker.SetupWorker(ctx, "Consumer-a") }()
 	go func() { defer wg.Done(); worker.StartReclaimer(ctx, "Consumer_Backup") }()
 	go func() { defer wg.Done(); worker.StartScheduler(ctx, "Schedule_Buddy") }()
 	go func() { defer wg.Done(); worker.StartQueueHealth(ctx) }()
 	go func() { defer wg.Done(); worker.StartMonitoringSweep(ctx) }()
+	go func() { defer wg.Done(); alerts.StartAlertsSweep(ctx) }()
 
 	fmt.Println("Running... press Ctrl+C to stop")
 	<-ctx.Done()

@@ -56,6 +56,7 @@ func SampleQueueHealth(ctx context.Context, sampleSize int64) (models.QueueHealt
 	}
 
 	result := models.QueueHealth{
+		QueueName:               cache.TaskStream,
 		StreamLength:            count,
 		PendingCount:            pending.Count,
 		OldestPendingAgeSeconds: int64(oldestPendingAge.Seconds()),

@@ -3,6 +3,7 @@ package routes
 import (
 	"github.com/gin-gonic/gin"
 
+	"MTL_Scheduler_PII_Test/internals/auth"
 	"MTL_Scheduler_PII_Test/internals/handlers"
 )
 
@@ -19,20 +20,20 @@ func SetupRouter() *gin.Engine {
 	// RFC-008 §5.7 PII Findings: "Raw values should not be shown by default."
 	// This endpoint returns fingerprints only, matching that principle —
 	// raw values are only reachable via the gated /admin/pii-vault endpoint below.
-	r.GET("/pii/:job_id", handlers.GetPIIByJobId)
+	r.GET("/pii/:job_id", auth.RequireScope("pii.findings.read"), handlers.GetPIIByJobId)
 	// RFC-006 §17 Security: gated behind X-Admin-Key — placeholder auth,
 	// not a real permission-scope system yet (see RFC-006 §17 Open Questions)
-	r.GET("/admin/pii-vault/:job_id", handlers.GetDecryptedPII)
+	r.GET("/admin/pii-vault/:job_id", auth.RequireScope("pii.raw_value.read"), handlers.GetDecryptedPII)
 	// RFC-006 §21 Policy Test / Dry Run: evaluate a candidate policy against
 	// sample payload text without touching the database or activating the
 	// policy — lets a policy change be tested before it's trusted with real data
-	r.POST("/pii/dry-run", handlers.PostDryRun)
+	r.POST("/pii/dry-run", auth.RequireScope("pii.policy.validate"), handlers.PostDryRun)
 
-	r.GET("/pii/search", handlers.SearchPII)
+	r.GET("/pii/search", auth.RequireScope("pii.findings.read"), handlers.SearchPII)
 
 	// --- Policies---
-	r.GET("/pii/policy", handlers.GetActivePolicy)
-	r.POST("/pii/policy/reload", handlers.PostReloadPolicy)
+	r.GET("/pii/policy", auth.RequireScope("pii.policy.read"), handlers.GetActivePolicy)
+	r.POST("/pii/policy/reload", auth.RequireScope("pii.policy.activate"), handlers.PostReloadPolicy)
 
 	// --- Events & Monitoring ---
 	// RFC-008 §6 Timeline: "The timeline should merge facts from different
@@ -47,6 +48,11 @@ func SetupRouter() *gin.Engine {
 
 	// --- Scheduling ---
 	r.PATCH("/schedules/:schedule_id/toggle", handlers.ToggleSchedule)
+
+	// --- Alerts ---
+	r.GET("/alerts", auth.RequireScope("alerts.read"), handlers.GetAlerts)
+	r.POST("/alerts/:alert_id/acknowledge", auth.RequireScope("alerts.acknowledge"), handlers.PostAcknowledgeAlert)
+	r.POST("/alerts/rules/reload", auth.RequireScope("alerts.rules.reload"), handlers.PostReloadRules)
 
 	// --- Debug / Dev tools ---
 	r.DELETE("/debug/reset", handlers.NUKE_THE_FUCKER)

@@ -78,7 +78,7 @@ func EvaluatePolicy(findings []Finding, policy models.PIIPolicy, source string, 
 	return evaluated
 }
 
-func ActivatePolicy(ctx context.Context, path string, trigger string) (models.PIIPolicy, error) {
+func ActivatePolicy(ctx context.Context, path string, trigger string, source string) (models.PIIPolicy, error) {
 	policy, err := LoadPolicy(path)
 
 	activation := models.PolicyActivation{
@@ -89,7 +89,7 @@ func ActivatePolicy(ctx context.Context, path string, trigger string) (models.PI
 		activation.Result = "FAILED"
 		activation.FailureReason = err.Error()
 		database.DB.WithContext(ctx).Create(&activation)
-		events.LogEvent(ctx, "system", "pii.policy_reload_failed", "api")
+		events.LogEvent(ctx, "system", "pii.policy_reload_failed", source)
 		return models.PIIPolicy{}, err
 	}
 
@@ -99,7 +99,9 @@ func ActivatePolicy(ctx context.Context, path string, trigger string) (models.PI
 	activation.Result = "SUCCESS"
 	activation.Trigger = trigger
 	database.DB.WithContext(ctx).Create(&activation)
-	events.LogEvent(ctx, "system", "pii.policy_activated", "api")
+
+	LoadedPolicy.Store(&policy)
+	events.LogEvent(ctx, "system", "pii.policy_activated", source)
 
 	return policy, nil
 }

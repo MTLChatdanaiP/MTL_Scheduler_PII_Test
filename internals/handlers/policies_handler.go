@@ -46,7 +46,7 @@ func GetActivePolicy(c *gin.Context) {
 func PostReloadPolicy(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	policy, err := pii.ActivatePolicy(ctx, "policies/default.json", "MANUAL_RELOAD")
+	policy, err := pii.ActivatePolicy(ctx, "policies/default.json", "MANUAL_RELOAD", "api")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

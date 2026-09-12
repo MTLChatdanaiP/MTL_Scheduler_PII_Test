@@ -12,6 +12,10 @@ import (
 	"io"
 	"os"
 	"strings"
+	"unicode"
+	"unicode/utf8"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 var fingerprintKey = []byte(os.Getenv("PII_FINGERPRINT_KEY"))
@@ -25,7 +29,7 @@ var encryptKey = []byte(os.Getenv("PII_ENCR_KEY"))
 // , e.g. "[SSN-2]", to keep occurrences distinguishable for future rehydration. The Type value now originates from the
 //
 //	policy's detector definitions (PIIType strings), not a fixed Go enum.
-func Replacer(payload string, match string, PII_Type PIIType, index string) string {
+func ReplacerMatch(payload string, match string, PII_Type PIIType, index string) string {
 	replacement := "[" + string(PII_Type) + "-" + index + "]"
 	return strings.Replace(payload, match, replacement, 1)
 }
@@ -113,4 +117,47 @@ func Decrypt(ciphertext string) (string, error) {
 	}
 
 	return string(plaintext), nil
+}
+
+func isValidText(text string) bool {
+	return utf8.ValidString(text)
+}
+
+func normalizeText(text string) string {
+	return norm.NFC.String(text)
+}
+
+func isValidLuhn(number string) bool {
+
+	number = removeNonAlphanumeric(number)
+
+	for _, r := range number {
+		if !unicode.IsDigit(r) {
+			return false
+		}
+	}
+
+	if len(number) == 0 {
+		return false
+	}
+
+	sum := 0
+	shouldDouble := false
+
+	for i := len(number) - 1; i >= 0; i-- {
+		digit := int(number[i] - '0')
+
+		if shouldDouble {
+			digit *= 2
+
+			if digit > 9 {
+				digit -= 9
+			}
+		}
+
+		sum += digit
+		shouldDouble = !shouldDouble
+	}
+
+	return sum%10 == 0
 }

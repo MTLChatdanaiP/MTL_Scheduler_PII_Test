@@ -1,0 +1,109 @@
+{
+  "apiVersion": "monitoring.job/v1alpha1",
+  "kind": "AlertRules",
+  "metadata": { "name": "default", "version": 1, "checksum": "77d181c5dd099b414e013623c50391edb8b8e48d6e75f5a1fdf7f9a7e1e18e64" },
+  "spec": {
+    "rules": [
+      {
+        "id": "run-stuck-default",
+        "enabled": true,
+        "priority": 0,
+        "source": "ANNOTATION",
+        "annotationType": "RUN_STUCK",
+        "alertType": "RUN_STUCK",
+        "severity": "CRITICAL",
+        "scope": { "type": "GLOBAL" }
+      },
+      {
+        "id": "run-lost-default",
+        "enabled": true,
+        "priority": 0,
+        "source": "ANNOTATION",
+        "annotationType": "RUN_LOST",
+        "alertType": "RUN_LOST",
+        "severity": "CRITICAL",
+        "scope": { "type": "GLOBAL" }
+      },
+      {
+        "id": "run-duplicate-default",
+        "enabled": true,
+        "priority": 0,
+        "source": "ANNOTATION",
+        "annotationType": "RUN_DUPLICATE_SUSPECTED",
+        "alertType": "RUN_DUPLICATE_SUSPECTED",
+        "severity": "WARNING",
+        "scope": { "type": "GLOBAL" }
+      },
+      {
+        "id": "schedule-missed-default",
+        "enabled": true,
+        "priority": 0,
+        "source": "ANNOTATION",
+        "annotationType": "SCHEDULE_MISSED",
+        "alertType": "SCHEDULE_MISSED",
+        "severity": "CRITICAL",
+        "scope": { "type": "GLOBAL" }
+      },
+      {
+        "id": "queue-backlog-default",
+        "enabled": true,
+        "priority": 0,
+        "source": "METRIC",
+        "metric": "queue.pending_count",
+        "operator": "GT",
+        "threshold": 20,
+        "alertType": "QUEUE_BACKLOG",
+        "severity": "WARNING",
+        "scope": { "type": "GLOBAL" }
+      },
+      {
+        "id": "worker-offline-default",
+        "enabled": true,
+        "priority": 0,
+        "source": "METRIC",
+        "metric": "worker.heartbeat_age",
+        "operator": "GT",
+        "threshold": 60,
+        "alertType": "WORKER_OFFLINE",
+        "severity": "CRITICAL",
+        "scope": { "type": "GLOBAL" }
+      },
+      {
+        "id": "queue-no-consumer-default",
+        "enabled": true,
+        "priority": 0,
+        "source": "METRIC",
+        "metric": "queue.consumer_count",
+        "operator": "EQ",
+        "textValue": "0",
+        "alertType": "QUEUE_NO_CONSUMER",
+        "severity": "CRITICAL",
+        "scope": { "type": "GLOBAL" }
+      },
+      {
+        "id": "queue-age-high-default",
+        "enabled": true,
+        "priority": 0,
+        "source": "METRIC",
+        "metric": "queue.oldest_age",
+        "operator": "GT",
+        "threshold": 300,
+        "alertType": "QUEUE_AGE_HIGH",
+        "severity": "WARNING",
+        "scope": { "type": "GLOBAL" }
+      },
+      {
+        "id": "pii-policy-violated",
+        "enabled": true,
+        "priority": 0,
+        "source": "METRIC",
+        "metric": "pii.policy_action",
+        "operator": "EQ",
+        "textValue": "BLOCK",
+        "alertType": "PII_POLICY_VIOLATED",
+        "severity": "CRITICAL",
+        "scope": { "type": "PII_CATEGORY", "values": ["SSN", "CreditCard"] }
+      }
+    ]
+  }
+}

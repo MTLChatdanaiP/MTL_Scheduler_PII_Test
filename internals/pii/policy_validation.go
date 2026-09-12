@@ -37,7 +37,8 @@ func ValidatePolicy(policy models.PIIPolicy) []string {
 	validPiorities := map[int]bool{}
 
 	for _, rule := range policy.Spec.Rules {
-		for _, detid := range rule.DetectorIDs {
+		DetectorIDs := rule.Match.DetectorIDs
+		for _, detid := range DetectorIDs {
 			value, exists := valid_det[detid]
 			if exists {
 				if !value {

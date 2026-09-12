@@ -172,7 +172,7 @@ func PrefixBeforeAt(s string, visible int, replacement string, preserveFormat bo
 
 			domain = suffixReplacer(
 				domain,
-				len([]rune(domain)),
+				0,
 				replacement,
 				preserveFormat,
 			)

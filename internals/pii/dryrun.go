@@ -24,9 +24,9 @@ func DryRun(payload string, policy models.PIIPolicy, source string, jobType stri
 
 	for _, evaluated := range evaluated_findings {
 		finding := evaluated.Finding
-		result := DryRunResult{DetectorID: finding.DetectorID, PIIType: string(finding.Type), MatchedText: finding.Match, Action: evaluated.Rule.Action}
+		result := DryRunResult{DetectorID: finding.DetectorID, PIIType: string(finding.Type), MatchedText: finding.Match, Action: evaluated.Rule.Action.Type}
 		if result.Action == "MASK" {
-			result.MaskedPreview = Mask(finding.Match, evaluated.Rule.Mask)
+			result.MaskedPreview = Mask(finding.Match, evaluated.Rule.Action.Mask)
 		}
 		dryrun_results = append(dryrun_results, result)
 	}

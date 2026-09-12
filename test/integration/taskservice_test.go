@@ -10,6 +10,7 @@ import (
 	"github.com/oklog/ulid/v2"
 	"gorm.io/gorm/clause"
 
+	alerts "MTL_Scheduler_PII_Test/internals/alerting"
 	"MTL_Scheduler_PII_Test/internals/cache"
 	redisdb "MTL_Scheduler_PII_Test/internals/cache"
 	"MTL_Scheduler_PII_Test/internals/database"
@@ -20,7 +21,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	godotenv.Load("../../.env") // adjust relative path to your actual .env
+	godotenv.Load("../../.env")
 	database.ConnectDatabase()
 	redisdb.ConnectRedis()
 
@@ -29,8 +30,17 @@ func TestMain(m *testing.M) {
 		&models.Worker{}, &models.WorkerHeartbeat{}, &models.QueueHealth{}, &models.Attempt{},
 		&models.ExecutionChain{}, &models.ScheduleDefinition{}, &models.MonitoringAnnotation{}, &models.MonitoringHealth{},
 		&models.PIIVault{},
+		&models.PolicyActivation{}, &models.Alert{}, &models.Notification{},
 	)
 
+	// Same reason as internals/worker: CreateTask_Direct dereferences the
+	// LoadedPolicy atomic pointer, which is nil until something activates a policy.
+	if _, err := pii.ActivatePolicy(context.Background(), "../../policies/default.json", "STARTUP", "system"); err != nil {
+		panic("integration tests: failed to activate PII policy: " + err.Error())
+	}
+	if _, err := alerts.ActivateRules(context.Background(), "../../internals/alerting/rules.json", "system"); err != nil {
+		panic("integration tests: failed to activate alert rules: " + err.Error())
+	}
 	redisdb.Client.XGroupCreateMkStream(context.Background(), cache.TaskStream, worker.WorkerGroupA, "$")
 
 	os.Exit(m.Run())

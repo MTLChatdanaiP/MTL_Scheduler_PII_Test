@@ -7,14 +7,13 @@ import (
 	"MTL_Scheduler_PII_Test/internals/database"
 )
 
-// ResetAll truncates every table and flushes Redis entirely. Test-only —
-// never call this from production code. Panics on failure since a failed
-// reset means every subsequent test would run against dirty/inconsistent
-// state, which is worse than failing loudly and immediately.
 func ResetAll(ctx context.Context) {
 	tables := []string{
 		"tasks",
 		"pii_records",
+		"pii_vaults",
+		"policy_activations",
+		"alerts",
 		"event_envelopes",
 		"run_projections",
 		"workers",

@@ -4,7 +4,7 @@
   "metadata": {
     "name": "default",
     "version": 1,
-    "checksum": "fe73d9114655c6e25e484de2a96180e75482fd1de239bf200f1d9d6ab5807965"
+    "checksum": "f7e730406ad42206a45731c4796f219a48af6dfbff491ea6366cd05e8d27b4de"
   },
   "spec": {
     "evaluationMode": "FIRST_MATCH",
@@ -54,54 +54,68 @@
         "minimumConfidence": 1.0
     }
     ],
-    "rules": [
+      "rules": [
       {
         "id": "redact-all-default",
         "priority": 0,
-        "detectorIds": ["builtin-phone", "builtin-ssn", "builtin-ipaddress"],
         "match": {
           "sources": ["JOB_PAYLOAD", "TASK_NAME"],
           "piiTypes": ["Phone", "SSN", "IPAddress"],
-          "minimumConfidence": 0.0
+          "detectorIds": ["builtin-phone", "builtin-ssn", "builtin-ipaddress"],
+          "minimumConfidence": 0.0,
+          "queues": ["default"]
         },
-        "action": "REDACT"
+        "action": {
+          "type": "REDACT"
+        }
       },
       {
         "id": "mask-all-default",
         "priority": 1,
-        "detectorIds": ["builtin-creditcard"],
         "match": {
           "sources": ["JOB_PAYLOAD", "TASK_NAME"],
           "piiTypes": ["CreditCard"],
-          "minimumConfidence": 0.0
+          "detectorIds": ["builtin-creditcard"],
+          "jobTypes": ["PAYMENT"],
+          "labels": ["sensitive"]
         },
-        "action": "MASK"
+        "action": {
+          "type": "MASK", 
+          "Mask": {"strategy": "FULL", "maskCharacter": "*"}
+        }
       },
       {
         "id": "mask-email-domain",
         "priority": 2,
-        "detectorIds": ["builtin-email"],
         "match": {
           "sources": ["JOB_PAYLOAD", "TASK_NAME"],
           "piiTypes": ["Email"],
-          "minimumConfidence": 0.0
+          "detectorIds": ["builtin-email"],
+          "minimumConfidence": 0.0,
+          "labels": ["customer"]
         },
-        "action": "MASK",
-        "mask": {
-          "strategy": "EMAIL",
-          "visibleCharacters": 2,
-          "maskCharacter": "*",
-          "domainMode": "MASK"
+        "action": {
+          "type": "MASK",
+          "mask": {
+            "strategy": "EMAIL",
+            "visibleCharacters": 2,
+            "maskCharacter": "*",
+            "domainMode": "MASK"
+          }
         }
       },
       {
         "id": "redact-nested-phone",
         "priority": 3,
-        "detectorIds": ["builtin-phone"],
         "match": {
-          "fieldPaths": ["customers[*].phone"]
+          "fieldPaths": ["customers[*].phone"],
+          "detectorIds": ["builtin-phone"],
+          "queues": ["priority"],
+          "jobTypes": ["CUSTOMER_UPDATE"]
         },
-        "action": "REDACT"
+        "action": {
+          "type": "REDACT"
+        }
       }
     ]
   }

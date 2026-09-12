@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"time"
 
-	"MTL_Scheduler_PII_Test/internals/cache"
 	"MTL_Scheduler_PII_Test/internals/database"
 	"MTL_Scheduler_PII_Test/internals/models"
 
@@ -19,7 +18,6 @@ const (
 	stuckThreshold                 = 60 * time.Second
 	monitoringInterval             = 20 * time.Second
 	workerHeartbeatFreshnessWindow = 30 * time.Second
-	backlogThreshold               = 20
 	missedOccurrenceThreshold      = 5 * time.Minute
 )
 
@@ -39,7 +37,6 @@ func StartMonitoringSweep(ctx context.Context) {
 			checkLostTasks,
 			checkDuplicateExecution,
 			checkScheduleDrift,
-			checkQueueBacklog,
 		}
 
 		for _, check := range checks {
@@ -77,7 +74,6 @@ func StartMonitoringSweep(ctx context.Context) {
 		resolveClearedAnnotations(ctx, "RUN_LOST")
 		resolveDuplicateExecutionAnnotations(ctx)
 		resolveScheduleDriftAnnotations(ctx)
-		resolveQueueBacklogAnnotations(ctx)
 
 		time.Sleep(monitoringInterval)
 	}
@@ -434,70 +430,6 @@ func resolveScheduleDriftAnnotations(ctx context.Context) {
 		database.DB.WithContext(ctx).Where("schedule_id = ?", a.SubjectID).First(&sched)
 
 		if time.Since(sched.NextRunAt) < missedOccurrenceThreshold {
-			now := time.Now().UTC()
-			a.ResolvedAt = &now
-			database.DB.WithContext(ctx).Save(&a)
-		}
-	}
-}
-
-// ---------- RFC-005 §14 Queue Monitoring ----------
-
-func checkQueueBacklog(ctx context.Context) error {
-	var latest models.QueueHealth
-	err := database.DB.WithContext(ctx).Order("sampled_at DESC").First(&latest).Error
-
-	if err != nil {
-		fmt.Println("Failed to query lost tasks monitoring annotations:", err)
-		return err
-	}
-
-	if latest.PendingCount > backlogThreshold {
-		var existing models.MonitoringAnnotation
-
-		notFoundErr := database.DB.WithContext(ctx).
-			Where("subject_type = ? AND subject_id = ? AND type = ? AND resolved_at IS NULL", "QUEUE", cache.TaskStream, "QUEUE_BACKLOG").
-			First(&existing).Error
-
-		if notFoundErr != nil {
-			evidenceMap := map[string]interface{}{
-				"pending_count":      latest.PendingCount,
-				"pending_oldest_age": latest.OldestPendingAgeSeconds,
-			}
-
-			evidenceJSON, _ := json.Marshal(evidenceMap)
-			new_annotation := models.MonitoringAnnotation{
-				AnnotationID: ulid.Make().String(),
-				Type:         "QUEUE_BACKLOG",
-				SubjectType:  "QUEUE",
-				SubjectID:    cache.TaskStream,
-				DerivedAt:    time.Now().UTC(),
-				Evidence:     string(evidenceJSON),
-			}
-
-			if err := database.DB.WithContext(ctx).Create(&new_annotation).Error; err != nil {
-				fmt.Println("Failed to create monitoring annotation for queue:", cache.TaskStream, err)
-			}
-		}
-	}
-	return nil
-}
-
-func resolveQueueBacklogAnnotations(ctx context.Context) {
-	var annotations []models.MonitoringAnnotation
-	database.DB.WithContext(ctx).
-		Where("type = ? AND resolved_at IS NULL", "QUEUE_BACKLOG").
-		Find(&annotations)
-
-	if len(annotations) == 0 {
-		return
-	}
-
-	var latest models.QueueHealth
-	database.DB.WithContext(ctx).Order("sampled_at DESC").First(&latest)
-
-	if latest.PendingCount <= backlogThreshold {
-		for _, a := range annotations {
 			now := time.Now().UTC()
 			a.ResolvedAt = &now
 			database.DB.WithContext(ctx).Save(&a)

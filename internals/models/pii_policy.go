@@ -31,23 +31,31 @@ type DetectorDefinition struct {
 type MatchConditions struct {
 	Sources           []string
 	JobTypes          []string
+	Queues            []string
+	FieldPaths        []string
 	PIITypes          []string
-	FieldPaths        []string // unreachable until §10 exists
+	DetectorIDs       []string `json:"detectorIds"`
 	MinimumConfidence float64
+	Labels            []string
 }
 
 type PolicyRule struct {
-	ID          string
-	Priority    int
-	DetectorIDs []string
-	Match       MatchConditions
-	Action      string
-	Mask        MaskConfig
+	ID       string          `json:"id"`
+	Priority int             `json:"priority"`
+	Match    MatchConditions `json:"match"`
+	Action   PolicyAction    `json:"action"`
+}
+
+type PolicyAction struct {
+	Type        string     `json:"type"`
+	Replacement string     `json:"replacement"`
+	ReasonCode  string     `json:"reasonCode"`
+	Mask        MaskConfig `json:"mask"`
 }
 
 type MaskConfig struct {
-	Strategy          string // "KEEP_SUFFIX" (start with just this one)
-	VisibleCharacters int
-	MaskCharacter     string
-	DomainMode        string
+	Strategy          string `json:"strategy"`
+	VisibleCharacters int    `json:"visibleCharacters"`
+	MaskCharacter     string `json:"maskCharacter"`
+	DomainMode        string `json:"domainMode"`
 }

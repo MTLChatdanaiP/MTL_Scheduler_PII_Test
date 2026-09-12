@@ -9,6 +9,7 @@ import (
 type QueueHealth struct {
 	gorm.Model
 
+	QueueName               string
 	StreamLength            int64
 	PendingCount            int64
 	OldestPendingAgeSeconds int64

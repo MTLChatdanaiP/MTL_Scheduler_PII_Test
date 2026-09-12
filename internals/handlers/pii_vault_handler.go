@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"net/http"
-	"os"
 
 	"github.com/gin-gonic/gin"
 
@@ -12,14 +11,6 @@ import (
 )
 
 func GetDecryptedPII(c *gin.Context) {
-	adminKey := c.GetHeader("X-Admin-Key") //replace with actual auth later
-	expectedKey := os.Getenv("ADMIN_KEY")
-	if expectedKey == "" || adminKey != expectedKey {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"error": "unauthorized",
-		})
-		return
-	}
 
 	jobId := c.Param("job_id")
 	ctx := c.Request.Context()
