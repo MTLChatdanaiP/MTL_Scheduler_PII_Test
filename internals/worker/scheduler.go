@@ -80,6 +80,7 @@ func fireRecurringSchedules(ctx context.Context) {
 		task.TaskType = def.TaskType
 		task.Payload = def.Payload
 		task.ExpectedAt = expected
+		task.ScheduleId = def.ScheduleId
 
 		result := taskservice.CreateTask_Direct(ctx, task)
 

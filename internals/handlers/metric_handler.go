@@ -10,7 +10,7 @@ import (
 	"MTL_Scheduler_PII_Test/internals/models"
 )
 
-func GetMetrics(c *gin.Context) {
+func GetSystemMetrics(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	var runsCreatedTotal int64

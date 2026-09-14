@@ -14,6 +14,10 @@ func NUKE_THE_FUCKER(c *gin.Context) {
 	tables := []string{
 		"tasks",
 		"pii_records",
+		"pii_vaults",
+		"policy_activations",
+		"alerts",
+		"notifications",
 		"event_envelopes",
 		"run_projections",
 		"workers",

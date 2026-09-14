@@ -4,10 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	alerts "MTL_Scheduler_PII_Test/internals/alerting"
 	"MTL_Scheduler_PII_Test/internals/database"
 	"MTL_Scheduler_PII_Test/internals/models"
+	"MTL_Scheduler_PII_Test/internals/pagination"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -45,8 +47,8 @@ func PostAcknowledgeAlert(c *gin.Context) {
 }
 
 type AlertListResponse struct {
-	Count  int            `json:"count"`
-	Alerts []models.Alert `json:"alerts"`
+	Alerts []models.Alert      `json:"alerts"`
+	Page   pagination.PageInfo `json:"page"`
 }
 
 // RFC-007 §7: read access to alerts. Supports narrowing by status and severity
@@ -55,23 +57,45 @@ type AlertListResponse struct {
 func GetAlerts(c *gin.Context) {
 	query := database.DB.WithContext(c.Request.Context())
 
-	if status := c.Query("status"); status != "" {
-		query = query.Where("status = ?", status)
+	// RFC-008 §7 Filters
+	query = ApplyQueryFilters(c, query, []QueryFilter{
+		{Param: "status", Column: "status"},
+		{Param: "severity", Column: "severity"},
+	})
+
+	// RFC-008 §12 Pagination
+	p, err := pagination.ParseParams(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
 
-	if severity := c.Query("severity"); severity != "" {
-		query = query.Where("severity = ?", severity)
+	query, total, err := pagination.ApplyPagination(query, p, "opened_at")
+	if err != nil {
+		fmt.Println("[Alerts] failed to paginate alerts:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to paginate alerts"})
+		return
 	}
 
 	var found []models.Alert
-	if err := query.Order("opened_at DESC").Find(&found).Error; err != nil {
+	if err := query.Find(&found).Error; err != nil {
 		fmt.Println("[Alerts] failed to query alerts:", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query alerts"})
 		return
 	}
 
-	// RFC-007 §13 PII Safety: every field returned here is type, subject,
-	c.JSON(http.StatusOK, AlertListResponse{Count: len(found), Alerts: found})
+	var lastTS time.Time
+	var lastID uint
+
+	if len(found) > 0 {
+		lastTS = found[len(found)-1].OpenedAt
+		lastID = found[len(found)-1].ID
+	}
+
+	page := pagination.BuildPageInfo(p, len(found), lastTS, lastID, total)
+
+	// RFC-007 §13 PII Safety
+	c.JSON(http.StatusOK, AlertListResponse{Alerts: found, Page: page})
 }
 
 func PostReloadRules(c *gin.Context) {

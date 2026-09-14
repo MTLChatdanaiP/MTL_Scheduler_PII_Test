@@ -3,17 +3,20 @@
     "name": "postman-local", 
     "key": "dev-local-key-changeme", 
     "scopes": [
-  "pii.findings.read",
-  "pii.policy.read",
-  "pii.policy.validate",
-  "pii.policy.manage",
-  "pii.policy.activate",
-  "pii.masked_value.read",
-  "pii.raw_value.read",
-  "alerts.read",
-  "alerts.acknowledge",
-  "alerts.rules.reload"
-]
-            
+        "pii.findings.read",
+        "pii.policy.read",
+        "pii.policy.validate",
+        "pii.policy.manage",
+        "pii.policy.activate",
+        "pii.masked_value.read",
+        "pii.raw_value.read",
+        "alerts.read",
+        "alerts.acknowledge",
+        "alerts.rules.reload",
+        "job.read",
+        "job.logs.read",
+        "worker.read",
+        "queue.read"
+]     
 }
 ]

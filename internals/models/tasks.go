@@ -20,6 +20,8 @@ type Task struct {
 	// RFC-002 §4 Domain Model (ScheduleOccurrence.expected_at) / §7 Scheduling Flow — this project stores the due time directly on Task rather than a separate ScheduleDefinition/ScheduleOccurrence model
 	RunAt time.Time
 
+	ScheduleId string
+
 	// RFC-002 §8 Schedule Drift: only meaningfully set for tasks spawned from
 	// a ScheduleDefinition; stays zero-value for directly-POSTed tasks
 	ExpectedAt time.Time

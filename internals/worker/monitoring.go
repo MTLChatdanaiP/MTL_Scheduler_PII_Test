@@ -45,7 +45,7 @@ func StartMonitoringSweep(ctx context.Context) {
 			}
 		}
 
-		totalChecks := 5
+		totalChecks := 4
 		status := "DEGRADED"
 
 		switch {
