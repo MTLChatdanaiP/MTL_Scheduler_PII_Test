@@ -63,6 +63,26 @@ func RequireScope(scope string) gin.HandlerFunc {
 		}
 
 		c.Set("actor", principal.Name) // read back later via c.GetString("actor")
+		c.Set("scopes", principal.Scopes)
 		c.Next()
 	}
+}
+
+func HasScope(c *gin.Context, scope string) bool {
+	raw, exists := c.Get("scopes")
+	if !exists {
+		return false
+	}
+
+	scopes, ok := raw.([]string)
+	if !ok {
+		return false
+	}
+
+	for _, s := range scopes {
+		if s == scope {
+			return true
+		}
+	}
+	return false
 }

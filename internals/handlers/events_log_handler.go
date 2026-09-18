@@ -39,7 +39,7 @@ func GetRunProjectionByJobId(c *gin.Context) {
 
 func GetRunMetrics(c *gin.Context) {
 
-	JobId := c.Param("job_id")
+	JobId := c.Param("run_id")
 
 	fmt.Println("[Database] Fetching Metrics related to JodId")
 
@@ -104,7 +104,7 @@ func GetRunMetrics(c *gin.Context) {
 }
 
 func GetRunChain(c *gin.Context) {
-	JobId := c.Param("job_id")
+	JobId := c.Param("execution_chain_id")
 	ctx := c.Request.Context()
 
 	var task models.Task

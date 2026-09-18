@@ -129,5 +129,27 @@ func applyRunDerivedFilters(c *gin.Context, query *gorm.DB) *gorm.DB {
 		query = query.Where("job_id IN (?)", subquery)
 	}
 
+	if value := c.Query("duration_from"); value != "" {
+		subquery := database.DB.
+			Model(&models.Attempt{}).
+			Select("job_id").
+			Where("finished_at IS NOT NULL").
+			Where("started_at IS NOT NULL").
+			Where("finished_at - started_at >= (? || ' seconds')::interval", value)
+
+		query = query.Where("job_id IN (?)", subquery)
+	}
+
+	if value := c.Query("duration_to"); value != "" {
+		subquery := database.DB.
+			Model(&models.Attempt{}).
+			Select("job_id").
+			Where("finished_at IS NOT NULL").
+			Where("started_at IS NOT NULL").
+			Where("finished_at - started_at <= (? || ' seconds')::interval", value)
+
+		query = query.Where("job_id IN (?)", subquery)
+	}
+
 	return query
 }

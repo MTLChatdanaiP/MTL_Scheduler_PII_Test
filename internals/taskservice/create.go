@@ -11,6 +11,7 @@ import (
 	"github.com/oklog/ulid/v2"
 	"gorm.io/gorm/clause"
 
+	"MTL_Scheduler_PII_Test/internals/cache"
 	"MTL_Scheduler_PII_Test/internals/database"
 	"MTL_Scheduler_PII_Test/internals/events"
 	"MTL_Scheduler_PII_Test/internals/models"
@@ -116,6 +117,8 @@ func CreateTask_Direct(ctx context.Context, task models.Task) models.Task {
 	if task.RunAt.Before(time.Now().UTC()) {
 		task.RunAt = time.Now().UTC()
 	}
+
+	task.Queue = cache.TaskStream
 
 	// RFC-000 §5.3 Domain Events Are Facts: run.created-equivalent event
 	database.DB.WithContext(ctx).Create(&task)

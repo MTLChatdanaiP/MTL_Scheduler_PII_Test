@@ -55,7 +55,7 @@ type AlertListResponse struct {
 // so an operator can ask for what actually needs attention rather than reading
 // every alert ever opened.
 func GetAlerts(c *gin.Context) {
-	query := database.DB.WithContext(c.Request.Context())
+	query := database.DB.WithContext(c.Request.Context()).Model(&models.Alert{})
 
 	// RFC-008 §7 Filters
 	query = ApplyQueryFilters(c, query, []QueryFilter{
@@ -70,7 +70,7 @@ func GetAlerts(c *gin.Context) {
 		return
 	}
 
-	query, total, err := pagination.ApplyPagination(query, p, "opened_at")
+	query, total, err := pagination.ApplyPagination(query, p, "opened_at", &models.Alert{})
 	if err != nil {
 		fmt.Println("[Alerts] failed to paginate alerts:", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to paginate alerts"})

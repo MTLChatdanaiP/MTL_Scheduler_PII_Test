@@ -16,7 +16,8 @@
         "job.read",
         "job.logs.read",
         "worker.read",
-        "queue.read"
-]     
-}
-]
+        "queue.read",
+        "worker.read",
+        "queue.read",
+        "job.write"
+]}]

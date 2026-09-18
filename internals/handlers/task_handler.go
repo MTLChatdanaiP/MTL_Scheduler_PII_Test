@@ -1,13 +1,16 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"MTL_Scheduler_PII_Test/internals/database"
+	"MTL_Scheduler_PII_Test/internals/freshness"
 	"MTL_Scheduler_PII_Test/internals/models"
 	"MTL_Scheduler_PII_Test/internals/pagination"
 	"MTL_Scheduler_PII_Test/internals/taskservice"
@@ -32,7 +35,7 @@ func CreateTask(c *gin.Context) { // RFC-001 §9 Commands: CreateInitialRun
 }
 
 func GetTask(c *gin.Context) {
-	query := database.DB.WithContext(c.Request.Context())
+	query := database.DB.WithContext(c.Request.Context()).Model(&models.Task{})
 
 	// RFC-008 §7 Filters
 	query = ApplyQueryFilters(c, query, []QueryFilter{
@@ -45,6 +48,7 @@ func GetTask(c *gin.Context) {
 		{Param: "retry_index", Column: "retry_index"},
 		{Param: "schedule_id", Column: "schedule_id"},
 		{Param: "pii_scan_status", Column: "scan_status"},
+		{Param: "queue", Column: "queue"},
 	})
 
 	query = ApplyQueryRangeFilters(c, query, []QueryRangeFilter{
@@ -60,7 +64,7 @@ func GetTask(c *gin.Context) {
 		return
 	}
 
-	query, total, err := pagination.ApplyPagination(query, p, "created_at")
+	query, total, err := pagination.ApplyPagination(query, p, "created_at", &models.Task{})
 	if err != nil {
 		fmt.Println("[Database] Failed to paginate runs:", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to paginate runs"})
@@ -129,9 +133,7 @@ func GetTask(c *gin.Context) {
 			}
 		}
 
-		if err := database.DB.WithContext(c.Request.Context()).
-			Where("subject_type = ? AND subject_id IN ?", "RUN", jobIDs).
-			Find(&annotations).Error; err != nil {
+		if err := database.DB.WithContext(c.Request.Context()).Where("subject_type = ? AND subject_id IN ?", "RUN", jobIDs).Find(&annotations).Error; err != nil {
 			fmt.Println("[Database] Failed to fetch run annotations:", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch run annotations"})
 			return
@@ -263,9 +265,157 @@ func GetTask(c *gin.Context) {
 		total,
 	)
 
+	var newestLastEvent time.Time        // newestLastEvent  time.Time
+	for _, proj := range projectionMap { // you already have this map
+		if proj.LastEventAt.After(newestLastEvent) {
+			newestLastEvent = proj.LastEventAt
+		}
+	}
+
+	watermark, err := freshness.CurrentWatermark(c.Request.Context())
+	if err != nil {
+		fmt.Println("failed to compute watermark:", err)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"runs": runs,
-		"page": page,
+		"runs":      runs,
+		"page":      page,
+		"freshness": freshness.FreshnessFrom(newestLastEvent),
+		"live":      freshness.LiveInfo{Watermark: watermark},
+	})
+}
+
+type RunDetailResponse struct {
+	Run              RunListItem             `json:"run"`
+	Freshness        freshness.FreshnessInfo `json:"freshness"`
+	Live             freshness.LiveInfo      `json:"live"`
+	PayloadSizeBytes int                     `json:"payload_size_bytes"`
+}
+
+func GetTaskDetail(c *gin.Context) {
+	jobID := c.Param("run_id")
+
+	query := database.DB.WithContext(c.Request.Context()).Where("job_id = ?", jobID)
+
+	var task models.Task
+	if err := query.First(&task).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "run not found"})
+			return
+		}
+
+		fmt.Println("[Database] Failed to fetch run:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch run"})
+		return
+	}
+
+	var projection models.RunProjection
+	var attempts []models.Attempt
+	var piiFindings []models.PIIRecord
+	var alerts []models.Alert
+	var schedule models.ScheduleDefinition
+	var annotations []models.MonitoringAnnotation
+
+	if err := database.DB.WithContext(c.Request.Context()).Where("job_id = ?", jobID).First(&projection).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			fmt.Println("[Database] Failed to fetch run projection:", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch run projection"})
+			return
+		}
+	}
+
+	if err := database.DB.WithContext(c.Request.Context()).Where("job_id = ?", jobID).Order("attempt_number ASC").Find(&attempts).Error; err != nil {
+		fmt.Println("[Database] Failed to fetch run attempts:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch run attempts"})
+		return
+	}
+
+	if err := database.DB.WithContext(c.Request.Context()).Where("job_id = ?", jobID).Find(&piiFindings).Error; err != nil {
+		fmt.Println("[Database] Failed to fetch PII findings:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch PII findings"})
+		return
+	}
+
+	if err := database.DB.WithContext(c.Request.Context()).Where("subject_type = ? AND subject_id = ?", "RUN", jobID).Find(&alerts).Error; err != nil {
+		fmt.Println("[Database] Failed to fetch run alerts:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch run alerts"})
+		return
+	}
+
+	if task.ScheduleId != "" {
+		if err := database.DB.WithContext(c.Request.Context()).Where("schedule_id = ?", task.ScheduleId).First(&schedule).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				fmt.Println("[Database] Failed to fetch schedule:", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch schedule"})
+				return
+			}
+		}
+	}
+
+	if err := database.DB.WithContext(c.Request.Context()).Where("subject_type = ? AND subject_id = ?", "RUN", jobID).Find(&annotations).Error; err != nil {
+		fmt.Println("[Database] Failed to fetch run annotations:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch run annotations"})
+		return
+	}
+
+	item := RunListItem{
+		Task: task,
+	}
+
+	item.CurrentStatus = projection.CurrentStatus
+	item.QueuedAt = projection.QueuedAt
+	item.StartedAt = projection.StartedAt
+	item.CompletedAt = projection.CompletedAt
+	item.RecoveryStarted = projection.RecoveryStarted
+	item.PIIFindingCount = projection.PIIFindingCount
+	item.WasReclaimed = projection.WasReclaimed
+	item.LastEventAt = projection.LastEventAt
+
+	item.Attempts = attempts
+	item.AttemptCount = len(attempts)
+
+	if len(attempts) > 0 {
+		latest := attempts[len(attempts)-1]
+		item.LatestWorker = latest.WorkerId
+		if !projection.StartedAt.IsZero() && !projection.CompletedAt.IsZero() {
+			item.Duration = projection.CompletedAt.Sub(projection.StartedAt)
+		}
+	}
+
+	for _, finding := range piiFindings {
+		item.PIIFindings = append(item.PIIFindings, PIIFindingItem{
+			Type:         finding.Type,
+			DetectorID:   finding.DetectorID,
+			Confidence:   finding.Confidence,
+			Source:       finding.Source,
+			Index:        finding.Index,
+			PolicyAction: finding.PolicyAction,
+		})
+	}
+
+	for _, alert := range alerts {
+		if alert.Status == "OPEN" {
+			item.ActiveAlertCount++
+		}
+	}
+
+	if task.ScheduleId != "" && schedule.ScheduleId != "" {
+		item.Schedule = &schedule
+	}
+
+	item.Annotations = annotations
+
+	freshnessInfo := freshness.FreshnessFrom(projection.LastEventAt)
+	watermark, err := freshness.CurrentWatermark(c.Request.Context())
+	if err != nil {
+		fmt.Println("failed to compute watermark:", err)
+	}
+
+	c.JSON(http.StatusOK, RunDetailResponse{
+		Run:              item,
+		Freshness:        freshnessInfo,
+		Live:             freshness.LiveInfo{Watermark: watermark},
+		PayloadSizeBytes: len(task.Payload),
 	})
 }
 

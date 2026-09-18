@@ -1,7 +1,6 @@
 package pagination
 
 import (
-	"MTL_Scheduler_PII_Test/internals/models"
 	"encoding/base64"
 	"fmt"
 	"strconv"
@@ -150,12 +149,12 @@ func BuildPageInfo(p Params, rowCount int, lastTS time.Time, lastID uint, total 
 	return info
 }
 
-func ApplyPagination(query *gorm.DB, p Params, tsColumn string) (*gorm.DB, *int64, error) {
+func ApplyPagination(query *gorm.DB, p Params, tsColumn string, model interface{}) (*gorm.DB, *int64, error) {
 	var total *int64
 
 	if p.Mode == PaginationOffset {
 		var count int64
-		if err := query.Model(&models.Task{}).Count(&count).Error; err != nil {
+		if err := query.Model(model).Count(&count).Error; err != nil {
 			return nil, nil, err
 		}
 
