@@ -4,10 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	alerts "MTL_Scheduler_PII_Test/internals/alerting"
 	"MTL_Scheduler_PII_Test/internals/database"
+	"MTL_Scheduler_PII_Test/internals/freshness"
 	"MTL_Scheduler_PII_Test/internals/models"
 	"MTL_Scheduler_PII_Test/internals/pagination"
 
@@ -47,8 +49,10 @@ func PostAcknowledgeAlert(c *gin.Context) {
 }
 
 type AlertListResponse struct {
-	Alerts []models.Alert      `json:"alerts"`
-	Page   pagination.PageInfo `json:"page"`
+	Alerts    []models.Alert          `json:"alerts"`
+	Page      pagination.PageInfo     `json:"page"`
+	Freshness freshness.FreshnessInfo `json:"freshness"`
+	Live      freshness.LiveInfo      `json:"live"`
 }
 
 // RFC-007 §7: read access to alerts. Supports narrowing by status and severity
@@ -59,8 +63,31 @@ func GetAlerts(c *gin.Context) {
 
 	// RFC-008 §7 Filters
 	query = ApplyQueryFilters(c, query, []QueryFilter{
+		{Param: "alert_type", Column: "alert_type"},
 		{Param: "status", Column: "status"},
 		{Param: "severity", Column: "severity"},
+		{Param: "subject_type", Column: "subject_type"},
+		{Param: "subject_id", Column: "subject_id"},
+		{Param: "rule_id", Column: "rule_id"},
+	})
+
+	query = applyAlertDerivedFilters(c, query)
+
+	if value := c.Query("rule_version"); value != "" {
+		ruleVersion, err := strconv.Atoi(value)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "rule_version must be an integer",
+			})
+			return
+		}
+
+		query = query.Where("rule_version = ?", ruleVersion)
+	}
+
+	query = ApplyQueryRangeFilters(c, query, []QueryRangeFilter{
+		{Param: "opened_from", Column: "opened_at", Op: ">="},
+		{Param: "opened_to", Column: "opened_at", Op: "<="},
 	})
 
 	// RFC-008 §12 Pagination
@@ -94,8 +121,24 @@ func GetAlerts(c *gin.Context) {
 
 	page := pagination.BuildPageInfo(p, len(found), lastTS, lastID, total)
 
+	var newestLastEvent time.Time
+	for _, alert := range found {
+		if alert.OpenedAt.After(newestLastEvent) {
+			newestLastEvent = alert.OpenedAt
+		}
+	}
+
+	watermark, err := freshness.CurrentWatermark(c.Request.Context())
+	if err != nil {
+		fmt.Println("failed to compute watermark:", err)
+	}
+
 	// RFC-007 §13 PII Safety
-	c.JSON(http.StatusOK, AlertListResponse{Alerts: found, Page: page})
+	c.JSON(http.StatusOK, AlertListResponse{
+		Alerts:    found,
+		Page:      page,
+		Freshness: freshness.FreshnessFrom(newestLastEvent),
+		Live:      freshness.LiveInfo{Watermark: watermark}})
 }
 
 func PostReloadRules(c *gin.Context) {

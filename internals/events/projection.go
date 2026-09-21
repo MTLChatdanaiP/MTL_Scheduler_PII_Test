@@ -41,7 +41,10 @@ func UpdateProjection(ctx context.Context, jobId string, eventType string, occur
 	}
 
 	// RFC-005 §7 Run Projection: current_status field
-	updates := map[string]interface{}{"current_status": status}
+	updates := map[string]interface{}{
+		"current_status": status,
+		"last_event_at":  occurredAt,
+	}
 	if field != "" {
 		updates[field] = value
 	}

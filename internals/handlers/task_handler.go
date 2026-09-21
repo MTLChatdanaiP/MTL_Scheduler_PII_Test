@@ -56,7 +56,11 @@ func GetTask(c *gin.Context) {
 		{Param: "created_to", Column: "created_at", Op: "<="},
 	})
 
-	query = applyRunDerivedFilters(c, query)
+	query, err := applyRunDerivedFilters(c, query)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	// RFC-008 §12 Pagination
 	p, err := pagination.ParseParams(c)
 	if err != nil {
@@ -84,8 +88,10 @@ func GetTask(c *gin.Context) {
 	var alerts []models.Alert
 	var schedules []models.ScheduleDefinition
 	var annotations []models.MonitoringAnnotation
+	var chainJobs []models.Task
 
 	scheduleIDs := make([]string, 0)
+	jobToChain := make(map[string]string) // job_id -> execution_chain_id, used to key PII findings by chain
 
 	for _, task := range tasks {
 		if task.ScheduleId != "" {
@@ -111,11 +117,44 @@ func GetTask(c *gin.Context) {
 			return
 		}
 
-		if err := database.DB.WithContext(c.Request.Context()).Where("job_id IN ?", jobIDs).Find(&piiFindings).Error; err != nil {
-			fmt.Println("[Database] Failed to fetch PII findings:", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch PII findings"})
-			return
+		// --- CHAIN-SCOPED PII LOOKUP ---
+		// if has execution chainPII record data i
+		chainIDs := make([]string, 0)
+		seenChain := make(map[string]bool)
+		for _, task := range tasks {
+			if task.ExecutionChainId != "" && !seenChain[task.ExecutionChainId] {
+				seenChain[task.ExecutionChainId] = true
+				chainIDs = append(chainIDs, task.ExecutionChainId)
+			}
 		}
+
+		if len(chainIDs) > 0 {
+			if err := database.DB.WithContext(c.Request.Context()).
+				Select("job_id, execution_chain_id").
+				Where("execution_chain_id IN ?", chainIDs).
+				Find(&chainJobs).Error; err != nil {
+				fmt.Println("[Database] Failed to fetch chain members:", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch chain members"})
+				return
+			}
+		}
+
+		chainJobIDs := make([]string, 0, len(chainJobs))
+		for _, t := range chainJobs {
+			chainJobIDs = append(chainJobIDs, t.JobId)
+			jobToChain[t.JobId] = t.ExecutionChainId
+		}
+
+		if len(chainJobIDs) > 0 {
+			if err := database.DB.WithContext(c.Request.Context()).
+				Where("job_id IN ?", chainJobIDs).
+				Find(&piiFindings).Error; err != nil {
+				fmt.Println("[Database] Failed to fetch PII findings:", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch PII findings"})
+				return
+			}
+		}
+		// --- END CHAIN-SCOPED PII LOOKUP ---
 
 		if err := database.DB.WithContext(c.Request.Context()).Where("subject_type = ? AND subject_id IN ?", "RUN", jobIDs).Find(&alerts).Error; err != nil {
 			fmt.Println("[Database] Failed to fetch run alerts:", err)
@@ -155,11 +194,16 @@ func GetTask(c *gin.Context) {
 		)
 	}
 
+	// piiMap is keyed by EXECUTION CHAIN ID now, not job_id — see the fetch above
 	piiMap := make(map[string][]PIIFindingItem, len(piiFindings))
 
 	for _, finding := range piiFindings {
-		piiMap[finding.JobID] = append(
-			piiMap[finding.JobID],
+		chainID, ok := jobToChain[finding.JobID]
+		if !ok {
+			continue // orphaned finding, no chain to attach it to — skip rather than guess
+		}
+		piiMap[chainID] = append(
+			piiMap[chainID],
 			PIIFindingItem{
 				Type:         finding.Type,
 				DetectorID:   finding.DetectorID,
@@ -224,7 +268,8 @@ func GetTask(c *gin.Context) {
 			}
 		}
 
-		if findings, ok := piiMap[task.JobId]; ok {
+		// was: piiMap[task.JobId] — now looked up by chain, see note above
+		if findings, ok := piiMap[task.ExecutionChainId]; ok {
 			item.PIIFindings = findings
 		}
 

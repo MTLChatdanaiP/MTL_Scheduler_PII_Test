@@ -3,6 +3,9 @@ package handlers
 import (
 	"MTL_Scheduler_PII_Test/internals/database"
 	"MTL_Scheduler_PII_Test/internals/models"
+	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -76,7 +79,7 @@ func ApplyQueryRangeFilters(c *gin.Context, query *gorm.DB, filters []QueryRange
 	return query
 }
 
-func applyRunDerivedFilters(c *gin.Context, query *gorm.DB) *gorm.DB {
+func applyRunDerivedFilters(c *gin.Context, query *gorm.DB) (*gorm.DB, error) {
 	db := database.DB.WithContext(c.Request.Context())
 
 	if value := c.Query("worker_id"); value != "" {
@@ -100,6 +103,9 @@ func applyRunDerivedFilters(c *gin.Context, query *gorm.DB) *gorm.DB {
 	}
 
 	if value := c.Query("attempt_count"); value != "" {
+		if _, err := strconv.Atoi(value); err != nil {
+			return query, fmt.Errorf("attempt_count must be a whole number")
+		}
 		subquery := db.Model(&models.Attempt{}).Select("job_id").Group("job_id").Having("COUNT(*) = ?", value)
 		query = query.Where("job_id IN (?)", subquery)
 	}
@@ -129,26 +135,45 @@ func applyRunDerivedFilters(c *gin.Context, query *gorm.DB) *gorm.DB {
 		query = query.Where("job_id IN (?)", subquery)
 	}
 
+	// duration_from / duration_to: validated as a plain number BEFORE being
+	// concatenated into the interval string. GORM's "?" placeholder still
+	// parameterizes it either way, but a non-numeric value here previously
+	// produced a confusing Postgres error instead of a clean 400 — this
+	// catches it at the Go layer where the message can actually say what's
+	// wrong.
 	if value := c.Query("duration_from"); value != "" {
+		if _, err := strconv.ParseFloat(value, 64); err != nil {
+			return query, fmt.Errorf("duration_from must be a number of seconds")
+		}
 		subquery := database.DB.
 			Model(&models.Attempt{}).
 			Select("job_id").
 			Where("finished_at IS NOT NULL").
 			Where("started_at IS NOT NULL").
 			Where("finished_at - started_at >= (? || ' seconds')::interval", value)
-
 		query = query.Where("job_id IN (?)", subquery)
 	}
 
 	if value := c.Query("duration_to"); value != "" {
+		if _, err := strconv.ParseFloat(value, 64); err != nil {
+			return query, fmt.Errorf("duration_to must be a number of seconds")
+		}
 		subquery := database.DB.
 			Model(&models.Attempt{}).
 			Select("job_id").
 			Where("finished_at IS NOT NULL").
 			Where("started_at IS NOT NULL").
 			Where("finished_at - started_at <= (? || ' seconds')::interval", value)
-
 		query = query.Where("job_id IN (?)", subquery)
+	}
+
+	return query, nil
+}
+
+func applyAlertDerivedFilters(c *gin.Context, query *gorm.DB) *gorm.DB {
+	if value := c.Query("alert_type"); value != "" {
+		types := strings.Split(value, ",")
+		query = query.Where("alert_type IN ?", types)
 	}
 
 	return query

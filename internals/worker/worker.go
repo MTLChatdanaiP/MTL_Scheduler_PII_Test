@@ -136,8 +136,6 @@ func ProcessTask(ctx context.Context, JobId string, workerId string) {
 
 		events.MarkRunCompleted(ctx, &task)
 
-		// RFC-000 §5.3: attempt.succeeded-equivalent event
-		events.LogEvent(ctx, task.JobId, "task.completed", "worker")
 	// RFC-001 §9 Commands: ScheduleRetryRun
 	case RetryableFailure:
 		// RFC-001 §8 Invariant 13: a repeated retry-scheduling command must

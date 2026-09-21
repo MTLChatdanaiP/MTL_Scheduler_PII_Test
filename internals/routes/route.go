@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 
 	"MTL_Scheduler_PII_Test/internals/auth"
@@ -25,6 +26,13 @@ import (
 
 func SetupRouter() *gin.Engine {
 	r := gin.Default()
+
+	r.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"http://localhost:5173"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "X-API-Key"},
+		AllowCredentials: false,
+	}))
 
 	// --- Timeline ---
 	r.GET("/execution-chains/:execution_chain_id/timeline", auth.RequireScope("job.logs.read"), handlers.GetChainTimeline)
