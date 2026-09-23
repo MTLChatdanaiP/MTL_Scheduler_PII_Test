@@ -1,7 +1,7 @@
 <script lang="ts">
-    import Piihealthcards from "../lib/PiiHealthCards.svelte";
-    import PIIFindingsList from "../lib/PiiFindingList.svelte";
+    import PIIHealthCards from "../lib/PIIHealthCards.svelte";
+    import PIIFindingsList from "../lib/PIIFindingsList.svelte";
 </script>
 
-<Piihealthcards />
+<PIIHealthCards />
 <PIIFindingsList />
