@@ -8,10 +8,10 @@ import (
 	"github.com/oklog/ulid/v2"
 	"github.com/redis/go-redis/v9"
 
-	"MTL_Scheduler_PII_Test/internals/cache"
-	"MTL_Scheduler_PII_Test/internals/database"
-	"MTL_Scheduler_PII_Test/internals/models"
-	"MTL_Scheduler_PII_Test/internals/worker"
+	"MTL_Scheduler_PII_Test/internal/cache"
+	"MTL_Scheduler_PII_Test/internal/database"
+	"MTL_Scheduler_PII_Test/internal/models"
+	"MTL_Scheduler_PII_Test/internal/worker"
 	"MTL_Scheduler_PII_Test/test/testutil"
 )
 

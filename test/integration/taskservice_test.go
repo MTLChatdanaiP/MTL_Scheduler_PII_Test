@@ -10,14 +10,14 @@ import (
 	"github.com/oklog/ulid/v2"
 	"gorm.io/gorm/clause"
 
-	alerts "MTL_Scheduler_PII_Test/internals/alerting"
-	"MTL_Scheduler_PII_Test/internals/cache"
-	redisdb "MTL_Scheduler_PII_Test/internals/cache"
-	"MTL_Scheduler_PII_Test/internals/database"
-	"MTL_Scheduler_PII_Test/internals/models"
-	"MTL_Scheduler_PII_Test/internals/pii"
-	"MTL_Scheduler_PII_Test/internals/taskservice"
-	"MTL_Scheduler_PII_Test/internals/worker"
+	alerts "MTL_Scheduler_PII_Test/internal/alerting"
+	"MTL_Scheduler_PII_Test/internal/cache"
+	redisdb "MTL_Scheduler_PII_Test/internal/cache"
+	"MTL_Scheduler_PII_Test/internal/database"
+	"MTL_Scheduler_PII_Test/internal/models"
+	"MTL_Scheduler_PII_Test/internal/pii"
+	"MTL_Scheduler_PII_Test/internal/taskservice"
+	"MTL_Scheduler_PII_Test/internal/worker"
 )
 
 func TestMain(m *testing.M) {
@@ -33,12 +33,12 @@ func TestMain(m *testing.M) {
 		&models.PolicyActivation{}, &models.Alert{}, &models.Notification{},
 	)
 
-	// Same reason as internals/worker: CreateTask_Direct dereferences the
+	// Same reason as internal/worker: CreateTask_Direct dereferences the
 	// LoadedPolicy atomic pointer, which is nil until something activates a policy.
 	if _, err := pii.ActivatePolicy(context.Background(), "../../policies/default.json", "STARTUP", "system"); err != nil {
 		panic("integration tests: failed to activate PII policy: " + err.Error())
 	}
-	if _, err := alerts.ActivateRules(context.Background(), "../../internals/alerting/rules.json", "system"); err != nil {
+	if _, err := alerts.ActivateRules(context.Background(), "../../internal/alerting/rules.json", "system"); err != nil {
 		panic("integration tests: failed to activate alert rules: " + err.Error())
 	}
 	redisdb.Client.XGroupCreateMkStream(context.Background(), cache.TaskStream, worker.WorkerGroupA, "$")

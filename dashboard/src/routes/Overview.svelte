@@ -5,7 +5,7 @@
     import WorkerHealthCards from "../lib/WorkerHealthCards.svelte";
     import ScheduleHealthCards from "../lib/ScheduleHealthCards.svelte";
     import AlertHealthCards from "../lib/AlertHealthCards.svelte";
-    import PiiHealthCards from "../lib/PiiCards.svelte";
+    import PiiHealthCards from "../lib/PIIHealthCards.svelte";
     import MonitoringHealthCards from "../lib/MonitoringHealthCards.svelte";
     import ActivityFeed from "../lib/LiveActivity.svelte";
 </script>

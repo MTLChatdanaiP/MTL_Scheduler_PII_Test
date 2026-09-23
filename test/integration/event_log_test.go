@@ -6,9 +6,9 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"MTL_Scheduler_PII_Test/internals/database"
-	"MTL_Scheduler_PII_Test/internals/events"
-	"MTL_Scheduler_PII_Test/internals/models"
+	"MTL_Scheduler_PII_Test/internal/database"
+	"MTL_Scheduler_PII_Test/internal/events"
+	"MTL_Scheduler_PII_Test/internal/models"
 )
 
 func TestLogEvent_CarriesLineageFields(t *testing.T) {

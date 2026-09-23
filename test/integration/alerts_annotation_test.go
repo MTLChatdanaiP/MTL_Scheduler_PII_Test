@@ -10,7 +10,7 @@ package integration_test
 // the sweep does -- by calling the exported entry points and inspecting the
 // database. If openAlertsFromAnnotations and resolveAlertsFromAnnotations are
 // unexported in your build, either export thin test wrappers or move this file
-// into internals/alerting as an in-package test. The assertions do not change.
+// into internal/alerting as an in-package test. The assertions do not change.
 
 import (
 	"context"
@@ -19,9 +19,9 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	alerts "MTL_Scheduler_PII_Test/internals/alerting"
-	"MTL_Scheduler_PII_Test/internals/database"
-	"MTL_Scheduler_PII_Test/internals/models"
+	alerts "MTL_Scheduler_PII_Test/internal/alerting"
+	"MTL_Scheduler_PII_Test/internal/database"
+	"MTL_Scheduler_PII_Test/internal/models"
 )
 
 // seedAnnotation inserts one unresolved monitoring fact and registers cleanup

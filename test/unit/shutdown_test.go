@@ -1,7 +1,7 @@
 package unit_test
 
 import (
-	"MTL_Scheduler_PII_Test/internals/shutdown"
+	"MTL_Scheduler_PII_Test/internal/shutdown"
 	"context"
 	"sync"
 	"testing"

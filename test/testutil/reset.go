@@ -3,8 +3,8 @@ package testutil
 import (
 	"context"
 
-	"MTL_Scheduler_PII_Test/internals/cache"
-	"MTL_Scheduler_PII_Test/internals/database"
+	"MTL_Scheduler_PII_Test/internal/cache"
+	"MTL_Scheduler_PII_Test/internal/database"
 )
 
 func ResetAll(ctx context.Context) {

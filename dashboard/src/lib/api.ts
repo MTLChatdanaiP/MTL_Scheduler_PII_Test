@@ -349,6 +349,45 @@ export function getMonitoringHealth(): Promise<MonitoringHealthResponse> {
     return apiFetch(`/monitoring/health`);
 }
 
+// ---------------------------------------------------------------- Overview
+
+export interface OverviewResponse {
+    active_runs: number;
+    queued_runs: number;
+    open_alerts: number;
+    degraded_queues: number;
+    offline_workers: number;
+    freshness: Freshness;
+    live: Live;
+}
+ 
+export function getOverview(): Promise<OverviewResponse> {
+    return apiFetch(`/overview`);
+}
+ 
+// ============================================================================
+// RFC-010 §16 contract, enforced in code rather than left as a comment
+// someone can forget: a live connection may ONLY be opened using a watermark
+// that came from a snapshot fetch that happened first. This function is the
+// single place that pairing happens -- once §17+ build the actual live
+// transport, its connect function should require a SnapshotHandoff, not a
+// bare number, so it's structurally impossible to open a live connection
+// without having fetched a snapshot immediately before it.
+// ============================================================================
+ 
+export interface SnapshotHandoff {
+    overview: OverviewResponse;
+    watermark: number;
+}
+ 
+export async function fetchSnapshotForLiveHandoff(): Promise<SnapshotHandoff> {
+    const overview = await getOverview();
+    return { overview, watermark: overview.live.watermark };
+}
+ 
+// Future: connectLive(handoff: SnapshotHandoff) -- takes THIS type, not a
+// raw number, once the live transport exists.
+
 // ---------------------------------------------------------------- Watermark/Page
 
 export interface Page {

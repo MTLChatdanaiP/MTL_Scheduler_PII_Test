@@ -5,7 +5,7 @@ import (
 	"net"
 	"testing"
 
-	"MTL_Scheduler_PII_Test/internals/cache"
+	"MTL_Scheduler_PII_Test/internal/cache"
 
 	"github.com/redis/go-redis/v9"
 )

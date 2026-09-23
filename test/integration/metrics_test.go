@@ -15,9 +15,9 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	alerts "MTL_Scheduler_PII_Test/internals/alerting"
-	"MTL_Scheduler_PII_Test/internals/database"
-	"MTL_Scheduler_PII_Test/internals/models"
+	alerts "MTL_Scheduler_PII_Test/internal/alerting"
+	"MTL_Scheduler_PII_Test/internal/database"
+	"MTL_Scheduler_PII_Test/internal/models"
 )
 
 // seedHeartbeat writes one heartbeat row aged by the given duration, and

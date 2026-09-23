@@ -4,7 +4,7 @@ package integration_test
 //
 // These use a stub adapter rather than the webhook one: the point is the
 // notification row's lifecycle, not HTTP. The webhook adapter itself is
-// covered by the unit tests in internals/alerting.
+// covered by the unit tests in internal/alerting.
 
 import (
 	"context"
@@ -14,9 +14,9 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	alerts "MTL_Scheduler_PII_Test/internals/alerting"
-	"MTL_Scheduler_PII_Test/internals/database"
-	"MTL_Scheduler_PII_Test/internals/models"
+	alerts "MTL_Scheduler_PII_Test/internal/alerting"
+	"MTL_Scheduler_PII_Test/internal/database"
+	"MTL_Scheduler_PII_Test/internal/models"
 )
 
 // stubAdapter lets a test decide whether delivery succeeds, without a network.

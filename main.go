@@ -13,15 +13,15 @@ import (
 
 	"github.com/joho/godotenv"
 
-	alerts "MTL_Scheduler_PII_Test/internals/alerting"
-	"MTL_Scheduler_PII_Test/internals/auth"
-	redisdb "MTL_Scheduler_PII_Test/internals/cache"
-	"MTL_Scheduler_PII_Test/internals/database"
-	"MTL_Scheduler_PII_Test/internals/models"
-	pii "MTL_Scheduler_PII_Test/internals/pii"
-	"MTL_Scheduler_PII_Test/internals/routes"
-	"MTL_Scheduler_PII_Test/internals/shutdown"
-	"MTL_Scheduler_PII_Test/internals/worker"
+	alerts "MTL_Scheduler_PII_Test/internal/alerting"
+	"MTL_Scheduler_PII_Test/internal/auth"
+	redisdb "MTL_Scheduler_PII_Test/internal/cache"
+	"MTL_Scheduler_PII_Test/internal/database"
+	"MTL_Scheduler_PII_Test/internal/models"
+	pii "MTL_Scheduler_PII_Test/internal/pii"
+	"MTL_Scheduler_PII_Test/internal/routes"
+	"MTL_Scheduler_PII_Test/internal/shutdown"
+	"MTL_Scheduler_PII_Test/internal/worker"
 )
 
 func main() {
@@ -34,11 +34,11 @@ func main() {
 		log.Fatal("Broken Policy, Stopping App", err)
 	}
 
-	if _, err := alerts.ActivateRules(context.Background(), "internals/alerting/rules.json", "system"); err != nil {
+	if _, err := alerts.ActivateRules(context.Background(), "internal/alerting/rules.json", "system"); err != nil {
 		log.Fatal("Broken Alerts Rules, Stopping App", err)
 	}
 
-	if err := auth.LoadPrincipals("internals/auth/config.json"); err != nil {
+	if err := auth.LoadPrincipals("internal/auth/config.json"); err != nil {
 		log.Fatal(err)
 	}
 

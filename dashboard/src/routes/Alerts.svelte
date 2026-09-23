@@ -16,6 +16,7 @@
     import DataStateBanner from "../lib/DataStateBanner.svelte";
     import { currentPath, parsePath, updateParams } from "../lib/router";
     import JsonTree from "../lib/JsonTree.svelte";
+    import AlertHealthCards from "../lib/AlertHealthCards.svelte";
 
     let alerts: AlertsResponse | null = null;
     let error: unknown = null;
@@ -166,22 +167,6 @@
         isEmpty: (alerts?.alerts.length ?? 0) === 0,
     });
 
-    // --- §8.5 cards ---
-    $: activeAlerts = (alerts?.alerts ?? []).filter(a => a.status !== "RESOLVED");
-    $: activeBySeverity = activeAlerts.reduce<Record<string, number>>((acc, a) => {
-        acc[a.severity] = (acc[a.severity] ?? 0) + 1;
-        return acc;
-    }, {});
-    $: newAlertsCount = (alerts?.alerts ?? []).filter(a => Date.now() - new Date(a.opened_at).getTime() < 15 * 60 * 1000).length;
-    $: acknowledgedCount = (alerts?.alerts ?? []).filter(a => a.status === "ACKNOWLEDGED").length;
-    $: highestImpactGroups = Object.entries(
-        activeAlerts.reduce<Record<string, number>>((acc, a) => {
-            const key = `${a.subject_type}:${a.subject_id}`;
-            acc[key] = (acc[key] ?? 0) + 1;
-            return acc;
-        }, {})
-    ).sort((a, b) => b[1] - a[1]).slice(0, 3);
-
     // --- toggle buttons: reuse statusFilter, mutually exclusive with the dropdown ---
     function toggleNotAcknowledged() {
         statusFilter = statusFilter === "OPEN" ? "" : "OPEN";
@@ -234,6 +219,8 @@
         }
     }
 </script>
+
+<AlertHealthCards />
 
 <h3>Alerts</h3>
 
@@ -296,29 +283,6 @@
 {/if}
 
 {#if state === "READY" || state === "REFRESHING"}
-    <div class="cards">
-        <div class="card">
-            <span>Active Alerts by Severity</span>
-            <div class="severity-breakdown">
-                {#each Object.entries(activeBySeverity) as [sev, count]}
-                    <span class="pill" class:critical={sev === "CRITICAL"} class:warning={sev === "WARNING"}>{sev}: {count}</span>
-                {/each}
-                {#if Object.keys(activeBySeverity).length === 0}<span class="pill">None active</span>{/if}
-            </div>
-        </div>
-        <div class="card"><span>New Alerts (last 15m)</span><strong>{newAlertsCount}</strong></div>
-        <div class="card"><span>Acknowledged Alerts</span><strong>{acknowledgedCount}</strong></div>
-        <div class="card">
-            <span>Highest-Impact Subjects</span>
-            <div class="impact-list">
-                {#each highestImpactGroups as [key, count]}
-                    <div class="impact-row"><span>{key.replace(":", " ")}</span><span>{count} active</span></div>
-                {/each}
-                {#if highestImpactGroups.length === 0}<span>None</span>{/if}
-            </div>
-        </div>
-    </div>
-
     <h3>Alert List (showing {alerts?.alerts.length ?? 0} of {alerts?.page.total ?? 0})</h3>
 
     <div class="alert-table">
@@ -376,14 +340,6 @@
     .filter-bar button { padding: 6px 12px; border: 1px solid #ccc; border-radius: 4px; background: white; cursor: pointer; align-self: flex-end; }
     .filter-bar button.active { background: #dbeafe; border-color: #1e40af; }
 
-    .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 12px; }
-    .card { padding: 16px; border: 1px solid #ddd; border-radius: 8px; }
-    .card span { display: block; margin-bottom: 8px; font-size: 13px; color: #555; }
-    .card strong { font-size: 28px; }
-    .severity-breakdown { display: flex; flex-direction: column; gap: 4px; }
-    .impact-list { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
-    .impact-row { display: flex; justify-content: space-between; }
-
     .alert-table { margin-top: 20px; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; }
     .alert-row { display: grid; grid-template-columns: 1fr 1.5fr 1fr 1fr 1.5fr 1.5fr 1.5fr; gap: 16px; padding: 12px 16px; border-top: 1px solid #ddd; }
     .alert-row.header { font-weight: bold; background: #f5f5f5; border-top: none; }
@@ -392,7 +348,6 @@
 
     .alert-detail { padding: 16px 24px; background: #fafafa; border-top: 1px solid #eee; font-size: 13px; }
 
-    .pill { display: inline-block; padding: 4px 8px; border-radius: 999px; font-size: 12px; font-weight: bold; background: #eee; width: fit-content; }
     .critical { background: #fee2e2; color: #991b1b; }
     .warning { background: #fef3c7; color: #92400e; }
     .open { background: #dbeafe; color: #1e40af; }

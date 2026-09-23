@@ -1,0 +1,47 @@
+package handlers
+
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+
+	"MTL_Scheduler_PII_Test/internal/database"
+)
+
+// ResetDatabase wipes every table used by this project. Debug/testing only —
+// never wire this into a production build.
+func NUKE_THE_FUCKER(c *gin.Context) {
+	tables := []string{
+		"tasks",
+		"pii_records",
+		"pii_vaults",
+		"policy_activations",
+		"alerts",
+		"notifications",
+		"event_envelopes",
+		"run_projections",
+		"workers",
+		"worker_heartbeats",
+		"attempts",
+		"queue_healths",
+		"execution_chains",
+		"schedule_definitions",
+		"monitoring_annotations",
+		"monitoring_healths",
+	}
+
+	for _, table := range tables {
+		if err := database.DB.Exec("TRUNCATE TABLE " + table + " RESTART IDENTITY CASCADE").Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":  "failed to truncate " + table,
+				"detail": err.Error(),
+			})
+			return
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "all tables truncated",
+		"tables":  tables,
+	})
+}

@@ -15,7 +15,7 @@ const baseURL = "http://localhost:8080"
 // apiKey returns the key the e2e suite authenticates with.
 //
 // Read from the environment rather than hardcoded so CI and a local machine can
-// use different keys: CI writes its own internals/auth/config.json with a
+// use different keys: CI writes its own internal/auth/config.json with a
 // throwaway key, while locally you have whatever is in your real config file.
 // The fallback is the dev key so `go test ./test/e2e/...` works with no setup.
 func apiKey() string {

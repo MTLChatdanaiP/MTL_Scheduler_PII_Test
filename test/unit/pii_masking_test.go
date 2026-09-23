@@ -3,8 +3,8 @@ package unit_test
 import (
 	"testing"
 
-	"MTL_Scheduler_PII_Test/internals/models"
-	"MTL_Scheduler_PII_Test/internals/pii"
+	"MTL_Scheduler_PII_Test/internal/models"
+	"MTL_Scheduler_PII_Test/internal/pii"
 )
 
 func TestMask(t *testing.T) {

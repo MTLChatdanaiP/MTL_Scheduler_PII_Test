@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"MTL_Scheduler_PII_Test/internals/pii"
+	"MTL_Scheduler_PII_Test/internal/pii"
 )
 
 func TestDetect(t *testing.T) {
