@@ -74,7 +74,27 @@ func CreateTask_Direct(ctx context.Context, task models.Task) models.Task {
 		temp[value.Type] += 1
 
 		// RFC-006 §7 Scan Model — Policy Evaluation stage, REDACT branch: finding is persisted separately (Claim Check) before the payload is rewritten
-		record := models.PIIRecord{JobID: task.JobId, Type: string(value.Type), DetectorID: value.DetectorID, FingerprintValue: pii.Fingerprint(value.Match), Index: temp[value.Type], Source: "JOB_PAYLOAD", Confidence: 1.0, PolicyAction: rule.Action.Type}
+		record := models.PIIRecord{
+			JobID:            task.JobId,
+			Type:             string(value.Type),
+			DetectorID:       value.DetectorID,
+			FingerprintValue: pii.Fingerprint(value.Match),
+			Index:            temp[value.Type],
+			Source:           "JOB_PAYLOAD",
+			Confidence:       1.0,
+			PolicyAction:     rule.Action.Type,
+
+			FieldPath:      value.FieldPath,
+			RuleID:         rule.ID,
+			PolicyName:     policy.Metadata.Name,
+			PolicyVersion:  policy.Metadata.Version,
+			PolicyChecksum: policy.Metadata.Checksum,
+		}
+
+		if rule.Action.Type == "MASK" {
+			record.MaskStrategy = rule.Action.Mask.Strategy
+		}
+
 		database.DB.WithContext(ctx).Create(&record)
 		events.LogEvent(ctx, task.JobId, "pii.detected", "api")
 

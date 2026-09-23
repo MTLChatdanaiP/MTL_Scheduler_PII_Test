@@ -70,7 +70,8 @@ func SetupRouter() *gin.Engine {
 	r.GET("/projection/:job_id", auth.RequireScope("job.read"), handlers.GetRunProjectionByJobId)       // RFC-008 §5.3
 	r.GET("/runs/:run_id/metrics", auth.RequireScope("job.read"), handlers.GetRunMetrics)               // RFC-008 §13
 	r.GET("/execution-chains/:execution_chain_id", auth.RequireScope("job.read"), handlers.GetRunChain) // RFC-008 §13
-	r.GET("/metrics", auth.RequireScope("job.read"), handlers.GetSystemMetrics)                         // RFC-008 §5.1
+	r.GET("/metrics", auth.RequireScope("job.read"), handlers.GetSystemMetrics)
+	r.GET("/monitoring/health", auth.RequireScope("job.read"), handlers.GetMonitoringHealth) // RFC-008 §5.1
 
 	// --- Scheduling ---
 	r.PATCH("/schedules/:schedule_id/toggle", auth.RequireScope("job.read"), handlers.ToggleSchedule)

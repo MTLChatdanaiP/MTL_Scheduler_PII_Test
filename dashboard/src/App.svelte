@@ -11,10 +11,12 @@
     import PII from "./routes/PII.svelte";
     import Monitoring from "./routes/Monitoring.svelte";
     import Components from "./routes/Components.svelte";
+    import LiveActivity from "./routes/LiveActivity.svelte";
 
     const pages: PageName[] = [
         "Overview", "Runs", "Queues", "Workers",
-        "Schedules", "Alerts", "PII", "Monitoring", "Components",
+        "Schedules", "Alerts", "PII", "Monitoring", 
+        "Components", "LiveActivity",
     ];
 
     const pageComponents = {
@@ -27,6 +29,7 @@
         "PII": PII,
         "Monitoring": Monitoring,
         "Components": Components,
+        "LiveActivity": LiveActivity,
     };
 
     type PageName = keyof typeof pageComponents;

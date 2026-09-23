@@ -8,13 +8,36 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"MTL_Scheduler_PII_Test/internals/database"
+	"MTL_Scheduler_PII_Test/internals/freshness"
 	"MTL_Scheduler_PII_Test/internals/models"
 	"MTL_Scheduler_PII_Test/internals/pagination"
 )
 
+// PIIFindingItem stays a projected type
+type PIIFindingItem struct {
+	Type         string  `json:"type"`
+	DetectorID   string  `json:"detector_id"`
+	Confidence   float64 `json:"confidence"`
+	Source       string  `json:"source"`
+	Index        int     `json:"index"`
+	PolicyAction string  `json:"policy_action"`
+
+	RunID          string `json:"run_id"`
+	FieldPath      string `json:"field_path,omitempty"`
+	RuleID         string `json:"rule_id"`
+	MaskStrategy   string `json:"mask_strategy,omitempty"`
+	PolicyName     string `json:"policy_name"`
+	PolicyVersion  int    `json:"policy_version"`
+	PolicyChecksum string `json:"policy_checksum"`
+	DetectedAt     string `json:"detected_at"`
+}
+
 type PIIListResponse struct {
 	PIIs []PIIFindingItem    `json:"piis"`
 	Page pagination.PageInfo `json:"page"`
+
+	Freshness freshness.FreshnessInfo `json:"freshness"`
+	Live      freshness.LiveInfo      `json:"live"`
 }
 
 func SearchPII(c *gin.Context) {
@@ -28,6 +51,7 @@ func SearchPII(c *gin.Context) {
 		{Param: "policy_action", Column: "pii_records.policy_action"},
 		{Param: "run_id", Column: "pii_records.job_id"},
 		{Param: "detector_id", Column: "pii_records.detector_id"},
+		{Param: "rule_id", Column: "pii_records.rule_id"}, // NEW, column exists now
 	})
 
 	// RFC-008 §12 Pagination
@@ -60,6 +84,15 @@ func SearchPII(c *gin.Context) {
 			Source:       r.Source,
 			Index:        r.Index,
 			PolicyAction: r.PolicyAction,
+
+			RunID:          r.JobID,
+			FieldPath:      r.FieldPath,
+			RuleID:         r.RuleID,
+			MaskStrategy:   r.MaskStrategy,
+			PolicyName:     r.PolicyName,
+			PolicyVersion:  r.PolicyVersion,
+			PolicyChecksum: r.PolicyChecksum,
+			DetectedAt:     r.CreatedAt.Format(time.RFC3339),
 		})
 	}
 
@@ -73,5 +106,28 @@ func SearchPII(c *gin.Context) {
 
 	page := pagination.BuildPageInfo(p, len(results), lastTS, lastID, total)
 
-	c.JSON(http.StatusOK, PIIListResponse{PIIs: piis, Page: page})
+	var newestLastEvent time.Time
+
+	for _, r := range results {
+		if r.CreatedAt.After(newestLastEvent) {
+			newestLastEvent = r.CreatedAt
+		}
+	}
+
+	freshnessInfo := freshness.FreshnessFrom(newestLastEvent)
+
+	watermark, err := freshness.CurrentWatermark(c.Request.Context())
+	if err != nil {
+		fmt.Println("[PII] failed to compute watermark:", err)
+	}
+
+	c.JSON(http.StatusOK, PIIListResponse{
+		PIIs: piis,
+		Page: page,
+
+		Freshness: freshnessInfo,
+		Live: freshness.LiveInfo{
+			Watermark: watermark,
+		},
+	})
 }

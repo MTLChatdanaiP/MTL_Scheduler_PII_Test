@@ -1,7 +1,7 @@
 <script lang="ts">
-    let { title = "Monitoring" } = $props();
+    import MonitoringHealthCards from "../lib/MonitoringHealthCards.svelte";
+    import MonitoringHealthDetail from "../lib/MonitoringHealthDetail.svelte";
 </script>
 
-<h3>{title}</h3>
-
-<p>This page is under construction.</p>
+<MonitoringHealthCards />
+<MonitoringHealthDetail />

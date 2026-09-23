@@ -1,7 +1,7 @@
 <script lang="ts">
-    let { title = "Schedules" } = $props();
+    import ScheduleHealthCards from "../lib/ScheduleHealthCards.svelte";
+    import ScheduleList from "../lib/ScheduleList.svelte";
 </script>
 
-<h3>{title}</h3>
-
-<p>This page is under construction.</p>
+<ScheduleHealthCards />
+<ScheduleList />

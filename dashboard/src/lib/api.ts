@@ -177,27 +177,16 @@ export function getQueueDetail(queueName: string): Promise<QueueDetailResponse> 
 // ---------------------------------------------------------------- Workers
 
 export interface WorkerListItem {
-    worker_id: string;
-    instance_id: string;
-    hostname: string;
-    started_at: string;
-    configured_capacity: number;
-    last_heartbeat: string;
-    running_attempts: number;
-    capacity: number;
-    is_stale: boolean;
+    WorkerId: string;
+    InstanceId: string;
+    Hostname: string;
+    StartedAt: string;
+    ConfiguredCapacity: number;
+    LastHeartbeat: string;
+    RunningAttempts: number;
+    Capacity: number;
 }
 
-export interface WorkersListResponse {
-    workers: WorkerListItem[];
-    freshness: Freshness;
-    live: Live;
-}
-
-// detail adds the extra fields from when you fixed GetWorkerDetail —
-// active_attempts / recent_completions / recent_failures / alerts /
-// active_alert_count. Confirm exact key casing on Attempt/Alert sub-objects
-// too, since those come from different structs than WorkerListItem.
 export interface WorkerDetailItem extends WorkerListItem {
     active_attempts: unknown[];
     recent_completions: unknown[];
@@ -205,31 +194,36 @@ export interface WorkerDetailItem extends WorkerListItem {
     alerts: Alert[];
     active_alert_count: number;
 }
-
+ 
+export interface WorkersListResponse {
+    workers: WorkerListItem[];
+    freshness: Freshness;
+    live: Live;
+}
+ 
 export interface WorkerDetailResponse {
     worker: WorkerDetailItem;
     freshness: Freshness;
     live: Live;
 }
-
+ 
 export function getWorkers(): Promise<WorkersListResponse> {
     return apiFetch(`/workers`);
 }
-
+ 
 export function getWorkerDetail(workerId: string): Promise<WorkerDetailResponse> {
-    return apiFetch(`/workers/${workerId}`);
+    return apiFetch(`/workers/${encodeURIComponent(workerId)}`);
 }
 
 // ---------------------------------------------------------------- Schedules
 
 export interface ScheduleDefinition {
-    schedule_id: string;
-    next_run_at: string;
-    enabled: boolean;
-    // there are likely more fields (name, cron expression) not confirmed —
-    // check Debug JSON and add them
+    ScheduleId: string;
+    NextRunAt: string;
+    Enabled: boolean;
 }
-
+ 
+// tagged/snake_case, per the Go struct given directly
 export interface ScheduleRunItem {
     run_id: string;
     expected_at: string;
@@ -239,25 +233,39 @@ export interface ScheduleRunItem {
     creation_drift_seconds: number;
     start_drift_seconds: number | null;
 }
-
+ 
+export interface MonitoringAnnotationItem {
+    AnnotationID: string;
+    Type: string;
+    SubjectType: string;
+    SubjectID: string;
+    DerivedAt: string;
+    Evidence: string;
+    ResolvedAt: string | null;
+}
+ 
 export interface SchedulesListResponse {
     schedules: ScheduleDefinition[];
     page: Page;
+    freshness: Freshness;
+    live: Live;
 }
-
+ 
 export interface ScheduleDetailResponse {
     schedule: ScheduleDefinition;
     recent_runs: ScheduleRunItem[];
-    annotations: unknown[];
+    annotations: MonitoringAnnotationItem[];
     next_expected_at: string | null;
+    freshness: Freshness;
+    live: Live;
 }
-
+ 
 export function getSchedules(params: string = ""): Promise<SchedulesListResponse> {
     return apiFetch(`/schedules${params}`);
 }
-
+ 
 export function getScheduleDetail(scheduleId: string): Promise<ScheduleDetailResponse> {
-    return apiFetch(`/schedules/${scheduleId}`);
+    return apiFetch(`/schedules/${encodeURIComponent(scheduleId)}`);
 }
 
 // ---------------------------------------------------------------- PII findings
@@ -271,30 +279,74 @@ export interface PIIFinding {
     policy_action: string;
 }
 
-export interface PIIFindingsResponse {
-    findings: PIIFinding[];   // confirm this key — it was "piis" before the
-                                // §13 rename, double check it landed
-    page: Page;
+export interface PIIFindingItem {
+    type: string;
+    detector_id: string;
+    confidence: number;
+    source: string;
+    index: number;
+    policy_action: string;
+ 
+    run_id: string;
+    field_path?: string;
+    rule_id: string;
+    mask_strategy?: string;
+    policy_name: string;
+    policy_version: number;
+    policy_checksum: string;
+    detected_at: string;
 }
 
-export function getPIIFindings(params: string = ""): Promise<PIIFindingsResponse> {
+export interface PIIListResponse {
+    piis: PIIFindingItem[];   // confirmed "piis", not "findings"
+    page: Page;
+    freshness: Freshness;
+    live: Live;
+}
+ 
+export function getPIIFindings(params: string = ""): Promise<PIIListResponse> {
     return apiFetch(`/pii/findings${params}`);
 }
+ 
 
 // ---------------------------------------------------------------- Monitoring health
 
-// DOESN'T EXIST YET on the backend — this is for when you build 8.7's
-// GET /monitoring/health endpoint. Written now so the shape is ready.
-export interface MonitoringHealth {
-    status: string;   // "COMPLETE" | "DEGRADED" | "PARTIAL" | "UNKNOWN"
-    failed_checks: number;
-    sampled_at: string;
+// ============================================================================
+// ADD TO api.ts
+// ============================================================================
+
+export interface SubsystemFreshness {
+    subsystem: string;
+    last_observed_at?: string;
+    lag_seconds?: number;
+    available: boolean;
+    unavailable_reason?: string;
 }
 
 export interface MonitoringHealthResponse {
-    health: MonitoringHealth;
+    sweep_status: string;
+    sweep_failed_checks: number;
+    sweep_sampled_at: string;
+
+    subsystems: SubsystemFreshness[];
+
+    active_policy_name: string;
+    active_policy_version: number;
+    active_policy_checksum: string;
+
+    last_reload_result: string;
+    last_reload_at: string;
+    last_reload_failure_reason?: string;
+
+    scanner_drift: string;
+    known_gaps: string[];
+
     freshness: Freshness;
     live: Live;
+}
+
+export function getMonitoringHealth(): Promise<MonitoringHealthResponse> {
+    return apiFetch(`/monitoring/health`);
 }
 
 // ---------------------------------------------------------------- Watermark/Page
@@ -314,10 +366,6 @@ export interface Freshness {
  
 export interface Live {
     watermark: number;
-}
-
-export function getMonitoringHealth(): Promise<MonitoringHealthResponse> {
-    return apiFetch(`/monitoring/health`);
 }
 
 async function apiPost<T>(path: string): Promise<T> {

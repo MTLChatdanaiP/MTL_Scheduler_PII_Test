@@ -2,7 +2,8 @@
     import { onMount } from "svelte";
     import { getRuns, type RunListItem } from "./api";
 
-    export let queueName: string;
+    export let queueName: string | null = null;
+    export let scheduleId: string | null = null;
     export let onClose: () => void;
 
     let runs: RunListItem[] = [];
@@ -10,15 +11,23 @@
     let loading = true;
     let error: string | null = null;
 
+    
+
     async function load() {
         loading = true;
         try {
-            const res = await getRuns(`?queue=${queueName}&limit=25&offset=0`);
+            const params = new URLSearchParams();
+            if (queueName) params.set("queue", queueName);
+            if (scheduleId) params.set("schedule_id", scheduleId);
+            params.set("limit", "25");
+            params.set("offset", "0");
+ 
+            const res = await getRuns(`?${params.toString()}`);
             runs = res.runs;
             total = res.page.total;
             error = null;
         } catch (e) {
-            error = (e as Error).message;
+            error = e instanceof Error ? e.message : "Something went wrong.";
         } finally {
             loading = false;
         }
@@ -34,7 +43,7 @@
 <div class="overlay" on:click={onClose} role="presentation">
     <div class="panel" on:click|stopPropagation role="dialog" aria-label="Runs affected by queue" tabindex="-1">
         <div class="panel-header">
-            <h3>Affected Runs — {queueName}</h3>
+            <h3>Affected Runs — {queueName ?? scheduleId}</h3>
             <button class="close-btn" on:click={onClose}>✕</button>
         </div>
 

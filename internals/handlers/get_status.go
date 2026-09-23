@@ -57,11 +57,22 @@ func GetWorkers(c *gin.Context) {
 	}
 
 	var workers []models.Worker
-	if err := query.Find(&workers).Error; err != nil {
+	if err := query.Order("started_at DESC").Find(&workers).Error; err != nil {
 		fmt.Println("[Database] Failed to fetch workers:", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch workers"})
 		return
 	}
+
+	seenWorker := make(map[string]bool)
+	latestWorkers := make([]models.Worker, 0, len(workers))
+	for _, w := range workers {
+		if seenWorker[w.WorkerId] {
+			continue
+		}
+		seenWorker[w.WorkerId] = true
+		latestWorkers = append(latestWorkers, w)
+	}
+	workers = latestWorkers
 
 	workerIDs := make([]string, 0, len(workers))
 	for _, worker := range workers {
@@ -272,9 +283,26 @@ func GetSchedules(c *gin.Context) {
 
 	page := pagination.BuildPageInfo(p, len(schedules), lastTS, lastID, total)
 
+	var newestLastEvent time.Time
+
+	for _, schedule := range schedules {
+		if schedule.UpdatedAt.After(newestLastEvent) {
+			newestLastEvent = schedule.UpdatedAt
+		}
+	}
+
+	watermark, err := freshness.CurrentWatermark(c.Request.Context())
+	if err != nil {
+		fmt.Println("failed to compute watermark:", err)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"schedules": schedules,
 		"page":      page,
+		"freshness": freshness.FreshnessFrom(newestLastEvent),
+		"live": freshness.LiveInfo{
+			Watermark: watermark,
+		},
 	})
 }
 
@@ -283,6 +311,9 @@ type ScheduleDetailResponse struct {
 	RecentRuns   []ScheduleRunItem             `json:"recent_runs"`
 	Annotations  []models.MonitoringAnnotation `json:"annotations"`
 	NextExpected *time.Time                    `json:"next_expected_at,omitempty"`
+
+	Freshness freshness.FreshnessInfo `json:"freshness"`
+	Live      freshness.LiveInfo      `json:"live"`
 }
 
 type ScheduleRunItem struct {
@@ -372,12 +403,40 @@ func GetScheduleDetail(c *gin.Context) {
 		nextExpected = &schedule.NextRunAt
 	}
 
-	response := ScheduleDetailResponse{
+	var newestLastEvent time.Time
+
+	if schedule.UpdatedAt.After(newestLastEvent) {
+		newestLastEvent = schedule.UpdatedAt
+	}
+
+	for _, task := range tasks {
+		if task.CreatedAt.After(newestLastEvent) {
+			newestLastEvent = task.CreatedAt
+		}
+	}
+
+	for _, annotation := range annotations {
+		if annotation.DerivedAt.After(newestLastEvent) {
+			newestLastEvent = annotation.DerivedAt
+		}
+	}
+
+	freshnessInfo := freshness.FreshnessFrom(newestLastEvent)
+
+	watermark, err := freshness.CurrentWatermark(c.Request.Context())
+	if err != nil {
+		fmt.Println("failed to compute watermark:", err)
+	}
+
+	c.JSON(http.StatusOK, ScheduleDetailResponse{
 		Schedule:     schedule,
 		RecentRuns:   recentRuns,
 		Annotations:  annotations,
 		NextExpected: nextExpected,
-	}
 
-	c.JSON(http.StatusOK, response)
+		Freshness: freshnessInfo,
+		Live: freshness.LiveInfo{
+			Watermark: watermark,
+		},
+	})
 }

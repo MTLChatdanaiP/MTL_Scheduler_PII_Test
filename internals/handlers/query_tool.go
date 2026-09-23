@@ -39,15 +39,6 @@ type RunListItem struct {
 	Annotations []models.MonitoringAnnotation `json:"annotations,omitempty"`
 }
 
-type PIIFindingItem struct {
-	Type         string  `json:"type"`
-	DetectorID   string  `json:"detector_id"`
-	Confidence   float64 `json:"confidence"`
-	Source       string  `json:"source"`
-	Index        int     `json:"index"`
-	PolicyAction string  `json:"policy_action"`
-}
-
 type QueryFilter struct {
 	Param  string
 	Column string

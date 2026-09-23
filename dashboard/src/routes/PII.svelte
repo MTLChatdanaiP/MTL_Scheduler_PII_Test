@@ -1,7 +1,7 @@
 <script lang="ts">
-    let { title = "PII" } = $props();
+    import Piihealthcards from "../lib/PiiHealthCards.svelte";
+    import PIIFindingsList from "../lib/PiiFindingList.svelte";
 </script>
 
-<h3>{title}</h3>
-
-<p>This page is under construction.</p>
+<Piihealthcards />
+<PIIFindingsList />

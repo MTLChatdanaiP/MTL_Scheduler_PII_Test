@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -18,6 +19,16 @@ const (
 	notificationRetryDelay  = 5 * time.Minute
 	notificationBatchLimit  = 50
 )
+
+var lastSweepAt atomic.Pointer[time.Time]
+
+func LastSweepAt() time.Time {
+	t := lastSweepAt.Load()
+	if t == nil {
+		return time.Time{}
+	}
+	return *t
+}
 
 func RunOpenPass(ctx context.Context)          { openAlertsFromAnnotations(ctx) }
 func RunResolvePass(ctx context.Context)       { resolveAlertsFromAnnotations(ctx) }
@@ -49,6 +60,9 @@ func StartAlertsSweep(ctx context.Context) {
 		resolveAlertsFromAnnotations(ctx)
 		resolveAlertsFromMetrics(ctx)
 		sendPendingNotifications(ctx)
+
+		now := time.Now().UTC()
+		lastSweepAt.Store(&now)
 
 		time.Sleep(alertsInterval)
 	}
