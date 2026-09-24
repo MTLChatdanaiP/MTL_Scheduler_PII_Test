@@ -1,6 +1,8 @@
 package routes
 
 import (
+	"context"
+
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 
@@ -24,7 +26,7 @@ import (
 // Paths mostly match RFC-008 §13's example list. Where a route differs,
 // that's a deliberate choice — the RFC states paths are non-normative.
 
-func SetupRouter() *gin.Engine {
+func SetupRouter(ctx context.Context) *gin.Engine {
 	r := gin.Default()
 
 	r.Use(cors.New(cors.Config{
@@ -81,6 +83,7 @@ func SetupRouter() *gin.Engine {
 	r.GET("/alerts", auth.RequireScope("alerts.read"), handlers.GetAlerts)                                          // RFC-007 §13, RFC-008 §13
 	r.POST("/alerts/:alert_id/acknowledge", auth.RequireScope("alerts.acknowledge"), handlers.PostAcknowledgeAlert) // RFC-007 §13
 	r.POST("/alerts/rules/reload", auth.RequireScope("alerts.rules.reload"), handlers.PostReloadRules)              // RFC-007 §13
+	r.GET("/live/alerts", auth.RequireScope("alerts.read"), handlers.GetLiveAlerts(ctx))
 
 	// --- Debug ---
 	r.DELETE("/debug/reset", handlers.NUKE_THE_FUCKER)

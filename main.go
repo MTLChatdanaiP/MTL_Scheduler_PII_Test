@@ -51,7 +51,10 @@ func main() {
 		&models.Alert{}, &models.Notification{},
 	)
 
-	r := routes.SetupRouter()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	r := routes.SetupRouter(ctx)
 
 	srv := &http.Server{
 		Addr:    ":8080",
@@ -63,9 +66,6 @@ func main() {
 			log.Printf("server error: %v", err)
 		}
 	}()
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	if url := os.Getenv("ALERT_WEBHOOK_URL"); url != "" {
 		adapter := alerts.NewWebhookAdapter(url)

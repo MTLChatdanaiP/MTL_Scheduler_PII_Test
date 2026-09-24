@@ -3,6 +3,7 @@ package alerts
 import (
 	"MTL_Scheduler_PII_Test/internal/database"
 	"MTL_Scheduler_PII_Test/internal/events"
+	"MTL_Scheduler_PII_Test/internal/live"
 	"MTL_Scheduler_PII_Test/internal/models"
 	"context"
 	"encoding/json"
@@ -150,6 +151,13 @@ func resolveAlertsFromAnnotations(ctx context.Context) {
 		}
 
 		events.LogEvent(ctx, alert.SubjectID, "alert.resolved", "alerting")
+
+		live.GlobalHub.Publish(live.Event{
+			Type: "alert.resolved",
+			Payload: map[string]interface{}{
+				"alert_id": alert.AlertID,
+			},
+		})
 	}
 }
 
@@ -170,6 +178,15 @@ func Acknowledge(ctx context.Context, alertID string, actor string) error {
 		return fmt.Errorf("failed to acknowledge alert %s: %w", alertID, err)
 	}
 	events.LogEvent(ctx, alert.SubjectID, "alert.acknowledged", "alerting")
+
+	live.GlobalHub.Publish(live.Event{
+		Type: "alert.acknowledged",
+		Payload: map[string]interface{}{
+			"alert_id": alert.AlertID,
+			"actor":    actor,
+		},
+	})
+
 	return nil
 }
 
@@ -244,6 +261,17 @@ func openAlertsFromMetrics(ctx context.Context) {
 			}
 
 			events.LogEvent(ctx, alert.SubjectID, "alert.opened", "alerting")
+
+			live.GlobalHub.Publish(live.Event{
+				Type: "alert.opened",
+				Payload: map[string]interface{}{
+					"alert_id":   alert.AlertID,
+					"alert_type": alert.AlertType,
+					"severity":   alert.Severity,
+					"subject_id": alert.SubjectID,
+					"summary":    alert.Summary,
+				},
+			})
 
 			createNotifications(ctx, alert)
 		}
