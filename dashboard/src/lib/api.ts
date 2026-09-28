@@ -360,33 +360,20 @@ export interface OverviewResponse {
     freshness: Freshness;
     live: Live;
 }
- 
+
 export function getOverview(): Promise<OverviewResponse> {
     return apiFetch(`/overview`);
 }
- 
-// ============================================================================
-// RFC-010 §16 contract, enforced in code rather than left as a comment
-// someone can forget: a live connection may ONLY be opened using a watermark
-// that came from a snapshot fetch that happened first. This function is the
-// single place that pairing happens -- once §17+ build the actual live
-// transport, its connect function should require a SnapshotHandoff, not a
-// bare number, so it's structurally impossible to open a live connection
-// without having fetched a snapshot immediately before it.
-// ============================================================================
- 
+
 export interface SnapshotHandoff {
     overview: OverviewResponse;
     watermark: number;
 }
- 
+
 export async function fetchSnapshotForLiveHandoff(): Promise<SnapshotHandoff> {
     const overview = await getOverview();
     return { overview, watermark: overview.live.watermark };
 }
- 
-// Future: connectLive(handoff: SnapshotHandoff) -- takes THIS type, not a
-// raw number, once the live transport exists.
 
 // ---------------------------------------------------------------- Watermark/Page
 
@@ -441,4 +428,18 @@ export class ApiError extends Error {
         super(message);
         this.status = status;
     }
+}
+
+export async function apiStream(path: string, signal: AbortSignal): Promise<Response> {
+    const res = await fetch(BASE_URL + path, {
+        headers: { "X-API-Key": API_KEY, Accept: "text/event-stream" },
+        signal,
+    });
+
+    if (!res.ok || !res.body) {
+        const body = await res.json().catch(() => ({}));
+        throw new ApiError(body.error || `request failed: ${res.status}`, res.status);
+    }
+
+    return res;
 }

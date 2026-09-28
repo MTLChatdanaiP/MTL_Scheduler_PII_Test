@@ -84,6 +84,7 @@ func SetupRouter(ctx context.Context) *gin.Engine {
 	r.POST("/alerts/:alert_id/acknowledge", auth.RequireScope("alerts.acknowledge"), handlers.PostAcknowledgeAlert) // RFC-007 §13
 	r.POST("/alerts/rules/reload", auth.RequireScope("alerts.rules.reload"), handlers.PostReloadRules)              // RFC-007 §13
 	r.GET("/live/alerts", auth.RequireScope("alerts.read"), handlers.GetLiveAlerts(ctx))
+	r.GET("/live/activity", auth.RequireScope("job.read"), handlers.GetLive(ctx))
 
 	// --- Debug ---
 	r.DELETE("/debug/reset", handlers.NUKE_THE_FUCKER)

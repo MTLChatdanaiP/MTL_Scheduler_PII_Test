@@ -5,9 +5,9 @@
     import WorkerHealthCards from "../lib/WorkerHealthCards.svelte";
     import ScheduleHealthCards from "../lib/ScheduleHealthCards.svelte";
     import AlertHealthCards from "../lib/AlertHealthCards.svelte";
-    import PiiHealthCards from "../lib/PIIHealthCards.svelte";
+    import PIIHealthCards from "../lib/PIIHealthCards.svelte";
     import MonitoringHealthCards from "../lib/MonitoringHealthCards.svelte";
-    import ActivityFeed from "../lib/LiveActivity.svelte";
+    import ActivityFeed from "../lib/ActivityFeed.svelte";
 </script>
 
 <h2>Overview</h2>
@@ -19,7 +19,10 @@
 <WorkerHealthCards />
 <ScheduleHealthCards />
 <AlertHealthCards />
-<PiiHealthCards />
+<PIIHealthCards />
 <MonitoringHealthCards />
 
+<!-- Live Activity: connection badge, filters, real-time graph and the feed.
+     One component, one live connection. Move this line up if you want it
+     nearer the top of the page. -->
 <ActivityFeed />

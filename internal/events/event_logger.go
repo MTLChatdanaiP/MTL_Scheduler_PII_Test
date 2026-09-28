@@ -2,6 +2,7 @@ package events
 
 import (
 	"MTL_Scheduler_PII_Test/internal/database"
+	"MTL_Scheduler_PII_Test/internal/live"
 	"MTL_Scheduler_PII_Test/internal/models"
 	"context"
 	"fmt"
@@ -46,5 +47,14 @@ func LogEvent(ctx context.Context, jobId string, eventType string, producer stri
 		//add a metric or counter or something idk
 	} else {
 		UpdateProjection(ctx, jobId, eventType, event.OccurredAt)
+
+		if !live.IsNoise(eventType) {
+			live.GlobalHub.Publish(live.Event{
+				ID:      event.ID,
+				Type:    eventType,
+				Subject: jobId,
+				At:      event.OccurredAt,
+			})
+		}
 	}
 }

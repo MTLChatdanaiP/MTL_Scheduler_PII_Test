@@ -1,5 +1,5 @@
 <script lang="ts">
-    import ActivityFeed from "../lib/LiveActivity.svelte";
+    import ActivityFeed from "../lib/ActivityFeed.svelte";
 </script>
 
-<ActivityFeed />
+<ActivityFeed listHeight={700} />
