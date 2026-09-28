@@ -273,8 +273,6 @@ func openAlertsFromMetrics(ctx context.Context) {
 
 			events.LogEvent(ctx, alert.SubjectID, "alert.opened", "alerting")
 
-			fmt.Println("========== BEFORE PUBLISH ==========")
-
 			live.GlobalHub.Publish(live.Event{
 				Type: "alert.opened",
 				Payload: map[string]interface{}{
@@ -285,8 +283,6 @@ func openAlertsFromMetrics(ctx context.Context) {
 					"summary":    alert.Summary,
 				},
 			})
-
-			fmt.Println("========== AFTER PUBLISH ==========")
 
 			createNotifications(ctx, alert)
 		}

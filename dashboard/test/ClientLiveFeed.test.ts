@@ -33,7 +33,7 @@ vi.mock("../src/lib/api", () => {
     };
 });
 
-import { connectLive, type LiveState } from "../src/lib/LiveClient";
+import { connectLive, type LiveState } from "../src/lib/liveClient";
 
 interface Recorded {
     after: string | null;

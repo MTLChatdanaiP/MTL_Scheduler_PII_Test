@@ -176,8 +176,8 @@ func TestAlerting_AcknowledgeRecordsActor(t *testing.T) {
 	}
 
 	// QUEUE is already RFC-007 vocabulary, so it must pass through untranslated.
-	if acked.SubjectType != "QUEUE" {
-		t.Errorf("subject type = %q, want QUEUE unchanged", acked.SubjectType)
+	if acked.SubjectType != annotation.SubjectType {
+		t.Errorf("subject type = %q, want %q unchanged", acked.SubjectType, annotation.SubjectType)
 	}
 }
 
