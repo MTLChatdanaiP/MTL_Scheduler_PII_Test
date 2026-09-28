@@ -1,5 +1,5 @@
 import { apiStream, ApiError, type SnapshotHandoff } from "./api";
-import { createSSEParser } from "./SSEParser";
+import { createSSEParser } from "./sseParser";
 
 export type LiveState = "CONNECTING" | "LIVE" | "RECONNECTING" | "RESYNCING" | "FORBIDDEN" | "CLOSED";
 

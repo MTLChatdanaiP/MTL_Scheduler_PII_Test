@@ -50,6 +50,12 @@ jobs:
       # any test comparing a stored fingerprint would behave differently in CI.
       #
       # ADMIN_KEY is deliberately gone -- RFC-006 §33 retired it.
+      #
+      # EVERY line must be KEY=value. godotenv rejects the WHOLE file if any
+      # line has no "=", and then loads nothing at all -- every DB variable came
+      # back empty and TestMain panicked with "invalid port". ALERT_WEBHOOK_URL
+      # is deliberately empty: main.go only registers the webhook adapter when
+      # it is non-empty.
       - name: Create .env for tests
         run: |
           echo "DB_HOST=localhost" >> .env
@@ -63,16 +69,31 @@ jobs:
           echo "MAX_CONCURRENCY=5" >> .env
           echo "PII_RETENTION_HOURS=24" >> .env
           echo "RETENTION_SWEEP_INTERVAL_HOURS=1" >> .env
-          echo "ALERT_WEBHOOK_URL" >> .env 
+          echo "ALERT_WEBHOOK_URL=" >> .env
+
+      # Fails early, and names the bad line, instead of letting a malformed
+      # .env show up later as an empty-database-host panic.
+      - name: Validate .env format
+        run: |
+          if grep -nvE '^[A-Za-z_][A-Za-z0-9_]*=' .env; then
+            echo "Malformed line(s) in .env (listed above): every line must be KEY=value"
+            exit 1
+          fi
 
       # Startup calls auth.LoadPrincipals and log.Fatal's if the file is missing.
       # Writing it here rather than relying on the committed one means CI keeps
-      # working whether or not internals/auth/config.json is gitignored -- and it
+      # working whether or not internal/auth/config.json is gitignored -- and it
       # keeps the CI key distinct from whatever is in the developer's file.
       #
       # The scope list must cover every scope any test exercises. A missing scope
       # surfaces as a 403 in an e2e test, which reads like a broken endpoint
       # rather than a missing config entry.
+      #
+      # job.read / job.write / job.logs.read / queue.read were missing. Since
+      # RFC-008 §11 every route is scoped (POST /tasks needs job.write, GET /runs
+      # and GET /metrics need job.read, timelines need job.logs.read, GET /queues
+      # needs queue.read), so the e2e tests and the readiness check below would
+      # have got 403 from the CI key.
       - name: Create auth config for tests
         run: |
           mkdir -p internal/auth
@@ -82,6 +103,10 @@ jobs:
               "name": "ci-test",
               "key": "ci-test-key",
               "scopes": [
+                "job.read",
+                "job.write",
+                "job.logs.read",
+                "queue.read",
                 "pii.findings.read",
                 "pii.policy.read",
                 "pii.policy.validate",
@@ -115,11 +140,14 @@ jobs:
       - name: Run unit tests
         run: go test -timeout 300s ./test/unit/...
 
+      # -p 1: these packages all share ONE Postgres and several of them wipe
+      # tables (DELETE FROM tasks / workers). Go runs different packages in
+      # parallel by default, so without -p 1 they corrupt each other's data.
       - name: Run integration tests
-        run: go test -timeout 300s ./test/integration/...
+        run: go test -p 1 -timeout 300s ./test/integration/...
 
       - name: Run internal tests
-        run: go test -timeout 300s ./internal/...
+        run: go test -p 1 -timeout 300s ./internal/...
 
       - name: Build the app
         run: go build -o app .
@@ -128,11 +156,15 @@ jobs:
       # `sleep 15` assumed it -- if startup failed, every e2e test failed with a
       # connection error and the real cause (a log.Fatal on a bad config file)
       # was buried in output nobody reads.
+      #
+      # /metrics requires job.read, so the check must send the API key. Without
+      # it the app answers 403, `curl -f` treats that as a failure, and the loop
+      # reports "failed to start" for an app that is running fine.
       - name: Start the app in the background
         run: |
           ./app > app.log 2>&1 &
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:8080/metrics > /dev/null 2>&1; then
+            if curl -sf -H "X-API-Key: ci-test-key" http://localhost:8080/metrics > /dev/null 2>&1; then
               echo "app is up"
               exit 0
             fi
@@ -157,7 +189,7 @@ jobs:
       # one test that genuinely must not run here stays excluded:
       # TestGracefulShutdown_InFlightTaskCompletes shuts the app down, which
       # would break every test after it.
-      # E2E_API_KEY must match the key written into internals/auth/config.json
+      # E2E_API_KEY must match the key written into internal/auth/config.json
       # above. The e2e helpers attach it to every request; scoped routes return
       # 403 without it, which surfaces as a confusing assertion failure rather
       # than an auth error.
@@ -171,6 +203,7 @@ jobs:
       - name: Show app log on failure
         if: failure()
         run: cat app.log || true
+
   frontend-test:
     runs-on: ubuntu-latest
 

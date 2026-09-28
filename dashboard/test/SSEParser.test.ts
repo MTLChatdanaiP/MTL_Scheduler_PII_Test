@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createSSEParser } from "../src/lib/SSEParser";
+import { createSSEParser } from "../src/lib/sseParser";
 
 const wire =
     ": connected\n\nid: 7\nevent: alert.opened\ndata: {\"id\":7}\n\n: ping\n\nid: 8\nevent: task.created\ndata: {\"id\":8}\n\n";
