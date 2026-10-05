@@ -3,13 +3,22 @@
     import { autoRefreshEnabled } from "../lib/stores";
     import { fetchSnapshotForLiveHandoff, ApiError } from "../lib/api";
     import { connectLive, type LiveEvent, type LiveState } from "../lib/liveClient";
-    import { CATEGORIES, categoryOf, filterEvents, countByCategory, connectionBadge, type Category } from "../lib/activity";
+    import { CATEGORIES, categoryOf, filterEvents, countByCategory, connectionBadge, gapStart,type Category } from "../lib/activity";
     import ActivityGraph from "../lib/ActivityGraph.svelte";
     import DataStateBanner from "../lib/DataStateBanner.svelte";
+    import { currentPath, parsePath, updateParams } from "../lib/router";
+    import { recordLiveState } from "./telemetry";
 
     // Height of the List view in px. Overview uses the default; the full-page
     // Live Activity page passes a taller value.
     export let listHeight = 320;
+
+    // RFC-009 §16: put filters + the List/Graph choice in the URL. Defaults to
+    // OFF, because this component is embedded twice -- a small summary widget
+    // on Overview, and the dedicated Live Activity page. The Overview widget
+    // must not fight the rest of that page for ownership of the address bar;
+    // only the full-page route opts in.
+    export let syncUrl = false;
 
     const MAX_KEPT = 1000; // events held in memory (feeds the graph and the filters)
     const MAX_LIST = 50; // rows actually rendered
@@ -32,7 +41,35 @@
     let show: Record<Category, boolean> = { task: true, alert: true, pii: true, other: true };
     let subject = "";
 
+    // Encode which categories are HIDDEN, not which are shown: an absent
+    // param then means "everything visible" (today's actual default), and a
+    // category added to CATEGORIES in the future is automatically visible on
+    // an old shared link too, instead of silently defaulting to hidden.
+    function syncFiltersFromUrl() {
+        if (!syncUrl) return;
+        const { params } = parsePath($currentPath);
+        const hidden = new Set((params.get("hidden") ?? "").split(",").filter(Boolean));
+        show = {
+            task: !hidden.has("task"),
+            alert: !hidden.has("alert"),
+            pii: !hidden.has("pii"),
+            other: !hidden.has("other"),
+        };
+        subject = params.get("subject") ?? "";
+        view = params.get("view") === "graph" ? "graph" : "list";
+    }
+
+    function commitUrl() {
+        if (!syncUrl) return;
+        updateParams({
+            hidden: CATEGORIES.filter((c) => !show[c]).join(","),
+            subject,
+            view: view === "graph" ? "graph" : "", // "list" is the default -- omit it, keep the URL clean
+        });
+    }
+
     let stopLive: (() => void) | null = null;
+    let unsubscribePath: (() => void) | undefined;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let want = false;
     let starting = false;
@@ -61,7 +98,7 @@
                         if (all.some((x) => x.id === e.id)) return;
                         all = [e, ...all].slice(0, MAX_KEPT);
                     },
-                    onState: (s) => { liveState = s; },
+                    onState: (s) => { liveState = s; recordLiveState(s); },
                     onConfirm: (at) => { lastConfirmedAt = at; },
                     onResync: async () => {
                         all = [];
@@ -95,10 +132,16 @@
     }
 
     onMount(() => {
+        syncFiltersFromUrl();
+        unsubscribePath = currentPath.subscribe(() => {
+            syncFiltersFromUrl(); // no refetch needed, filtered/visible are reactive
+        });
+
         mounted = true;
         clock = setInterval(() => { now = Date.now(); }, 1000); // keeps the graph sliding when quiet
     });
     onDestroy(() => {
+        unsubscribePath?.();
         clearInterval(clock);
         stop();
     });
@@ -112,12 +155,14 @@
     function clearFilters() {
         show = { task: true, alert: true, pii: true, other: true };
         subject = "";
+        commitUrl();
     }
 
     $: paused = !$autoRefreshEnabled;
     // RFC-010 §18: the badge says whether the operator is currently seeing updates.
     $: badge = connectionBadge({ paused, state: liveState, lastConfirmedAt, now });
     $: unsure = badge.state === "STALE" || badge.state === "DEGRADED";
+    $: gapFrom = gapStart(badge.state, lastConfirmedAt);
 
     function shortId(id: string): string {
         return id.length > 12 ? `${id.slice(0, 8)}…` : id;
@@ -129,10 +174,10 @@
     <span class="badge {badge.state.toLowerCase()}">{badge.label}</span>
 
     <div class="views" role="group" aria-label="View">
-        <button class:active={view === "list"} aria-pressed={view === "list"} on:click={() => (view = "list")}>
+        <button class:active={view === "list"} aria-pressed={view === "list"} on:click={() => { view = "list"; commitUrl(); }}>
             List
         </button>
-        <button class:active={view === "graph"} aria-pressed={view === "graph"} on:click={() => (view = "graph")}>
+        <button class:active={view === "graph"} aria-pressed={view === "graph"} on:click={() => { view = "graph"; commitUrl(); }}>
             Graph
         </button>
     </div>
@@ -153,13 +198,13 @@
                 class="chip {c}"
                 class:off={!show[c]}
                 aria-pressed={show[c]}
-                on:click={() => (show[c] = !show[c])}
+                on:click={() => { show[c] = !show[c]; commitUrl(); }}
             >
                 {c} <span class="n">{counts[c]}</span>
             </button>
         {/each}
 
-        <input type="text" placeholder="Filter by run / subject id" bind:value={subject} />
+        <input type="text" placeholder="Filter by run / subject id" bind:value={subject} on:change={commitUrl} />
 
         {#if anyFilter}
             <button class="clear" on:click={clearFilters}>Clear filters</button>
@@ -167,7 +212,7 @@
     </div>
 
     {#if view === "graph"}
-        <ActivityGraph events={filtered} {now} />
+        <ActivityGraph events={filtered} {now} {gapFrom} />
     {:else}
         <div class="feed" style="max-height: {listHeight}px">
             {#each visible as e (e.id)}

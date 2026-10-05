@@ -4,6 +4,7 @@
     import { getAlerts, type Alert } from "../lib/api";
     import { deriveState, errorMessage } from "../lib/dataState";
     import DataStateBanner from "../lib/DataStateBanner.svelte";
+    import { overviewRefreshTick } from "../lib/liveRefreshStores";
 
     // Same cards logic as Alerts.svelte's old §8.5 section, extracted into
     // its own self-contained fetcher matching every other XHealthCards.svelte
@@ -59,6 +60,16 @@
             return acc;
         }, {})
     ).sort((a, b) => b[1] - a[1]).slice(0, 3);
+
+    // RFC-010 §22: Overview starts ONE live connection for the whole page and
+    // bumps this; every card on it reloads instead of waiting for its own 10s
+    // poll. Same shape WorkerHealthCards/QueueHealthCards already use. Guarded
+    // on > 0 so the initial store value never triggers a duplicate first load.
+    let lastOverviewTick = 0;
+    $: if ($overviewRefreshTick !== lastOverviewTick) {
+        lastOverviewTick = $overviewRefreshTick;
+        if (lastOverviewTick > 0) load();
+    }
 </script>
 
 <h3>Alerts</h3>

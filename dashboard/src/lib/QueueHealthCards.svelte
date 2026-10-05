@@ -4,6 +4,7 @@
     import { getQueues, type QueueHealth } from "../lib/api";
     import { deriveState, errorMessage } from "../lib/dataState";
     import DataStateBanner from "../lib/DataStateBanner.svelte";
+    import { queueRefreshTick } from "../lib/liveRefreshStores";
  
     let hasLoadedOnce = false;
     let isFetching = false;
@@ -42,7 +43,9 @@
         }, 10000);
     });
 
-    onDestroy(() => clearInterval(refreshTimer));
+    onDestroy(() => {
+        clearInterval(refreshTimer);
+    });
 
     $: degradedCount = queues.filter(isDegraded).length;
     $: healthyCount = queues.length - degradedCount;
@@ -57,6 +60,13 @@
         error,
         isEmpty: false,   // cards always have a value, even if it's 0
     });
+
+    // RFC-009 S17 / RFC-010 S22: one shared connection per PAGE (see Workers.svelte/Queues.svelte) bumps this; every component on the page reloads.
+    let lastTick = 0;
+    $: if ($queueRefreshTick !== lastTick) {
+        lastTick = $queueRefreshTick;
+        if (lastTick > 0) loadQueues();
+    }
 </script>
 
 <h3>Queue Health</h3>

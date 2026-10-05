@@ -1,6 +1,18 @@
 <script lang="ts">
+    import { recordBannerShown } from "./telemetry";
+
     export let state: "INITIAL_LOADING" | "EMPTY" | "ERROR" | "FORBIDDEN";
     export let message: string | null = null;
+
+    // RFC-009 §23: "stale-data banner frequency" / "permission-denied
+    // navigation". Tracks the actual TRANSITION into a state, not every
+    // re-render while it is showing -- INITIAL_LOADING is excluded since it
+    // is expected, ordinary behaviour, not a failure signal.
+    let lastRecorded: string | undefined;
+    $: if (state && state !== "INITIAL_LOADING" && state !== lastRecorded) {
+        recordBannerShown(state);
+        lastRecorded = state;
+    }
 </script>
 
 {#if state === "INITIAL_LOADING"}

@@ -30,6 +30,12 @@ func CreateTask(c *gin.Context) { // RFC-001 §9 Commands: CreateInitialRun
 		return
 	}
 
+	// RFC-001 §2 Goals: the caller opts into duplicate-command protection by
+	// sending this header on every attempt of the SAME logical request
+	if key := c.GetHeader("Idempotency-Key"); key != "" {
+		task.IdempotencyKey = &key
+	}
+
 	result_reply := taskservice.CreateTask_Direct(ctx, task)
 	c.JSON(http.StatusCreated, result_reply)
 }

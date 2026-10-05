@@ -6,7 +6,6 @@ import (
 	"MTL_Scheduler_PII_Test/internal/models"
 	"MTL_Scheduler_PII_Test/internal/taskservice"
 	"context"
-	"fmt"
 	"log/slog"
 	"time"
 )
@@ -18,7 +17,7 @@ const schedulerInterval = 10 * time.Second
 // and publishes them to the stream.
 // RFC-002 §10 Scheduler Restart / Catch-Up: because due-ness is computed fresh from durable Postgres state on every poll, this loop exhibits CATCH_UP_ALL behavior automatically after a restart — SKIP_MISSED/CATCH_UP_LATEST are not implemented
 func StartScheduler(ctx context.Context, scheduler_id string) {
-	schedulerStruct := CreateWorker(ctx, scheduler_id)
+	schedulerStruct := CreateComponent(ctx, scheduler_id, "Scheduler")
 	schedulerInstId := schedulerStruct.InstanceId
 	go StartHeartbeat(ctx, scheduler_id, schedulerInstId)
 
@@ -71,11 +70,26 @@ func fireRecurringSchedules(ctx context.Context) {
 	}
 
 	for _, def := range schedule_defs {
-		var task models.Task
-
 		expected := def.NextRunAt
-		def.NextRunAt = time.Now().UTC().Add(time.Duration(def.IntervalSeconds) * time.Second)
+		nextRunAt := time.Now().UTC().Add(time.Duration(def.IntervalSeconds) * time.Second)
 
+		// RFC-002 §6 Core Invariant:
+		// Claiming BEFORE creating the task
+		claim := database.DB.WithContext(ctx).
+			Model(&models.ScheduleDefinition{}).
+			Where("schedule_id = ? AND next_run_at = ?", def.ScheduleId, expected).
+			Update("next_run_at", nextRunAt)
+
+		if claim.Error != nil {
+			slog.Error("failed to claim recurring schedule occurrence", "schedule_id", def.ScheduleId, "error", claim.Error)
+			continue
+		}
+		if claim.RowsAffected == 0 {
+			slog.Info("recurring schedule occurrence already claimed elsewhere, skipping", "schedule_id", def.ScheduleId)
+			continue
+		}
+
+		var task models.Task
 		task.TaskName = def.TaskName
 		task.TaskType = def.TaskType
 		task.Payload = def.Payload
@@ -83,9 +97,6 @@ func fireRecurringSchedules(ctx context.Context) {
 		task.ScheduleId = def.ScheduleId
 
 		result := taskservice.CreateTask_Direct(ctx, task)
-
-		fmt.Println("idk log results here IG", result)
-
-		database.DB.WithContext(ctx).Save(&def)
+		slog.Info("recurring schedule fired", "schedule_id", def.ScheduleId, "job_id", result.JobId)
 	}
 }

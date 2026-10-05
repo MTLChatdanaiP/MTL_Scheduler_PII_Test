@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"MTL_Scheduler_PII_Test/internal/events"
 	"MTL_Scheduler_PII_Test/internal/models"
 	"MTL_Scheduler_PII_Test/internal/pii"
 )
@@ -31,5 +32,14 @@ func PostDryRun(c *gin.Context) {
 	}
 
 	results := pii.DryRun(req.Payload, req.Policy, req.Source, req.JobType)
+
+	// RFC-006 §32: a dry run is how an operator checks a candidate policy before activating it.
+	// A detector that fails to compile or run means the candidate did not validate.
+	eventType := "pii.policy_validated"
+	if len(results.FailedDetectors) > 0 {
+		eventType = "pii.policy_validation_failed"
+	}
+	events.LogEvent(c.Request.Context(), "system", eventType, "api")
+
 	c.JSON(http.StatusOK, results)
 }

@@ -67,6 +67,10 @@ func SetupRouter(ctx context.Context) *gin.Engine {
 	r.GET("/pii/policy", auth.RequireScope("pii.policy.read"), handlers.GetActivePolicy)              // RFC-006 §16, RFC-008 §13
 	r.POST("/pii/policy/reload", auth.RequireScope("pii.policy.activate"), handlers.PostReloadPolicy) // RFC-006 §16
 
+	r.GET("/pii/policy/history", auth.RequireScope("pii.policy.read"), handlers.GetPolicyHistory)     // RFC-006 §31
+	r.GET("/pii/policy/rules", auth.RequireScope("pii.policy.read"), handlers.GetPolicyRules)         // RFC-006 §31
+	r.GET("/pii/policy/detectors", auth.RequireScope("pii.policy.read"), handlers.GetPolicyDetectors) // RFC-006 §31
+
 	// --- Runs & Monitoring ---
 	//r.GET("/runs/:run_id/events", auth.RequireScope("job.logs.read"), handlers.GetEventByJobId)         // RFC-008 §6, §13 RETIRED
 	r.GET("/projection/:job_id", auth.RequireScope("job.read"), handlers.GetRunProjectionByJobId)       // RFC-008 §5.3

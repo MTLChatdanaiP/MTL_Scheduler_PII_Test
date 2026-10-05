@@ -11,6 +11,13 @@
     let loading = true;
     let error: string | null = null;
 
+    // Moving focus INTO the dialog on open is what makes Escape work
+    // immediately -- keydown only bubbles from whatever element currently
+    // has focus, and without this the "View full timeline" button (outside
+    // this component entirely) keeps focus, so Escape never reaches here
+    // until the user clicks inside the panel first.
+    let panelEl: HTMLDivElement;
+
     // §6 asks for grouping/filtering noisy event classes WITHOUT deleting
     // them from the underlying evidence — this hides them client-side only,
     // the fetched data is untouched.
@@ -24,6 +31,7 @@
     $: hiddenCount = entries.length - visibleEntries.length;
 
     onMount(async () => {
+        panelEl?.focus();
         try {
             const res = await getChainTimeline(chainId);
             entries = res.entries;
@@ -55,8 +63,13 @@
     }
 </script>
 
-<div class="overlay" on:click={onClose} role="presentation">
-    <div class="panel" on:click|stopPropagation role="dialog" aria-label="Execution chain timeline" tabindex="-1">
+<div
+    class="overlay"
+    on:click={onClose}
+    on:keydown={(e) => e.key === "Escape" && onClose()}
+    role="presentation"
+>
+    <div class="panel" bind:this={panelEl} on:click|stopPropagation on:keydown={() => {}} role="dialog" aria-label="Execution chain timeline" tabindex="-1">
         <div class="panel-header">
             <h3>Timeline — Chain {shortId(chainId)}</h3>
             <button class="close-btn" on:click={onClose}>✕</button>

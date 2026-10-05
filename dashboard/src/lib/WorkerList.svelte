@@ -6,6 +6,7 @@
     import DataStateBanner from "../lib/DataStateBanner.svelte";
     import JsonTree from "../lib/JsonTree.svelte";
     import { currentPath, parsePath, updateParams } from "../lib/router";
+    import { workerRefreshTick } from "../lib/liveRefreshStores";
 
     const DEGRADED_HEARTBEAT_SECONDS = 60;
     const OFFLINE_HEARTBEAT_SECONDS = 300;
@@ -88,8 +89,6 @@
             workers = res.workers;
             error = null;
 
-            console.log("workers loaded:", workers.length, workers);
-
             for (const w of workers) {
                 backfillWorkerCounts(w.WorkerId);
             }
@@ -121,6 +120,13 @@
 
     $: state = deriveState({ hasLoadedOnce, isFetching, error, isEmpty: workers.length === 0 });
 
+    // RFC-009 S17 / RFC-010 S22: one shared connection per PAGE (see Workers.svelte/Queues.svelte) bumps this; every component on the page reloads.
+    let lastTick = 0;
+    $: if ($workerRefreshTick !== lastTick) {
+        lastTick = $workerRefreshTick;
+        if (lastTick > 0) loadWorkers();
+    }
+
     async function toggleExpanded(workerId: string) {
         if (expandedWorker === workerId) {
             expandedWorker = null;
@@ -139,14 +145,6 @@
             detailLoading = false;
         }
     }
-
-    $: console.log(
-        "filters",
-        workerIdFilter,
-        statusFilter,
-        hostnameFilter,
-        visibleWorkers.length
-    );
 </script>
 
 <div class="filter-bar">

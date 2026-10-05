@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { categoryOf, filterEvents, countByCategory, bucketEvents, connectionBadge, formatAge } from "../src/lib/activity";
-import type { LiveEvent } from "../src/lib/LiveClient";
+import type { LiveEvent } from "../src/lib/liveClient";
 
 const ev = (id: number, type: string, at: string, subject = "subj"): LiveEvent => ({ id, type, subject, at });
 

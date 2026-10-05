@@ -1,11 +1,14 @@
 <script lang="ts">
-    import { CATEGORIES, bucketEvents, type Bucket, type Category } from "../lib/activity";
+    import { CATEGORIES, bucketEvents, isGapBucket, type Bucket, type Category } from "../lib/activity";
     import type { LiveEvent } from "./liveClient";
 
     // Already-filtered events, and the current time. `now` is passed in (the
     // parent ticks it every second) so the chart keeps sliding when it's quiet.
     export let events: LiveEvent[];
     export let now: number;
+    // Time (ms) after which the live connection stopped confirming, or null when it is healthy.
+    // Buckets from there on are drawn as "no data", never as empty (zero) bars -- RFC-009 §19.
+    export let gapFrom: number | null = null;
 
     const BUCKET_MS = 10_000;
     const BUCKET_COUNT = 30; // 30 x 10s = a 5 minute window
@@ -31,6 +34,7 @@
     // at least 5, so a single event doesn't fill the whole chart height
     $: yMax = Math.max(5, ...buckets.map((b) => b.total));
     $: totalInWindow = buckets.reduce((sum, b) => sum + b.total, 0);
+    $: gapCount = buckets.filter((b) => isGapBucket(b.start, gapFrom)).length;
 
     // Stack the non-empty categories of one bucket from the bottom up.
     function segments(b: Bucket, yMax: number) {
@@ -43,8 +47,11 @@
         });
     }
 
-    function tooltip(b: Bucket): string {
+    function tooltip(b: Bucket, gapFrom: number | null): string {
         const start = new Date(b.start).toLocaleTimeString();
+        if (isGapBucket(b.start, gapFrom)) {
+            return `${start}: no data -- the live connection has not confirmed since ${new Date(gapFrom as number).toLocaleTimeString()}`;
+        }
         const parts = CATEGORIES.filter((c) => b.counts[c] > 0).map((c) => `${c} ${b.counts[c]}`);
         return `${start}: ${b.total} event${b.total === 1 ? "" : "s"}${parts.length ? ` (${parts.join(", ")})` : ""}`;
     }
@@ -54,7 +61,7 @@
     <svg
         viewBox="0 0 {W} {H}"
         role="img"
-        aria-label="Events per 10 seconds over the last 5 minutes. {totalInWindow} events in the window."
+        aria-label="Events per 10 seconds over the last 5 minutes. {totalInWindow} events in the window.{gapCount > 0 ? ` ${gapCount} of ${buckets.length} intervals have no data because the live connection is not confirming.` : ""}"
     >
         <!-- top gridline (= yMax) and baseline -->
         <line x1={PAD_L} x2={W - PAD_R} y1={PAD_T} y2={PAD_T} class="grid" />
@@ -64,9 +71,13 @@
 
         {#each buckets as b, i (b.start)}
             <g>
-                <title>{tooltip(b)}</title>
+                <title>{tooltip(b, gapFrom)}</title>
                 <!-- invisible full-height hit area so quiet buckets still show a tooltip -->
                 <rect x={PAD_L + i * slot} y={PAD_T} width={slot} height={plotH} fill="transparent" />
+                {#if isGapBucket(b.start, gapFrom)}
+                    <!-- unknown, not zero: a grey dashed block instead of an empty column -->
+                    <rect x={PAD_L + i * slot + 1} y={PAD_T} width={Math.max(1, slot - 2)} height={plotH} class="gap" />
+                {/if}
                 {#each segments(b, yMax) as s (s.cat)}
                     <rect
                         x={PAD_L + i * slot + 1}
@@ -87,6 +98,10 @@
         {#each CATEGORIES as c}
             <span class="key"><i style="background:{COLORS[c]}"></i>{c}</span>
         {/each}
+        <span class="units">bars = events per 10 s</span>
+        {#if gapCount > 0}
+            <span class="key"><i class="gapkey"></i>no data (connection not confirming)</span>
+        {/if}
         <span class="total">{totalInWindow} event{totalInWindow === 1 ? "" : "s"} in the last 5 min</span>
     </div>
 </div>
@@ -97,6 +112,9 @@
     .grid { stroke: #e5e7eb; stroke-dasharray: 3 3; }
     .axis { stroke: #d1d5db; }
     .label { font-size: 10px; fill: #888; }
+    .gap { fill: #e5e7eb; stroke: #9ca3af; stroke-dasharray: 2 2; opacity: 0.85; }
+    .units { color: #777; }
+    .key i.gapkey { background: #e5e7eb; border: 1px dashed #9ca3af; }
     .legend { display: flex; gap: 14px; align-items: center; font-size: 11px; color: #555; margin-top: 4px; }
     .key { display: inline-flex; align-items: center; gap: 4px; }
     .key i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }

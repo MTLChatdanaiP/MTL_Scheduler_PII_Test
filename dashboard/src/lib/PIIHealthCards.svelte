@@ -7,6 +7,7 @@
 
     let byType: Record<string, number> = {};
     let byAction: Record<string, number> = {};
+    let byRule: Record<string, number> = {};
     let scanFailureCount = 0;
     let error: unknown = null;
     let refreshTimer: ReturnType<typeof setInterval>;
@@ -21,9 +22,11 @@
 
             byType = {};
             byAction = {};
+            byRule = {};
             for (const p of res.piis) {
                 byType[p.type] = (byType[p.type] ?? 0) + 1;
                 byAction[p.policy_action] = (byAction[p.policy_action] ?? 0) + 1;
+                byRule[p.rule_id] = (byRule[p.rule_id] ?? 0) + 1;
             }
             const distinctRuns = new Set(res.piis.map(p => p.run_id));
             runsWithFindingsCount = distinctRuns.size;
@@ -83,6 +86,16 @@
                     <span class="pill">{action}: {count}</span>
                 {/each}
                 {#if Object.keys(byAction).length === 0}<span>None</span>{/if}
+            </div>
+        </div>
+
+        <div class="card">
+            <span>Findings by Rule</span>
+            <div class="breakdown">
+                {#each Object.entries(byRule) as [rule, count]}
+                    <span class="pill">{rule}: {count}</span>
+                {/each}
+                {#if Object.keys(byRule).length === 0}<span>None</span>{/if}
             </div>
         </div>
 

@@ -1,4 +1,4 @@
-import type { LiveEvent, LiveState } from "./LiveClient";
+import type { LiveEvent, LiveState } from "./liveClient";
 
 export type Category = "task" | "alert" | "pii" | "other";
 export const CATEGORIES: Category[] = ["task", "alert", "pii", "other"];
@@ -134,4 +134,14 @@ export function connectionBadge(input: {
     }
 
     return { state: "CONNECTING", label: "◌ CONNECTING" }; // CONNECTING and CLOSED
+}
+
+const NO_DATA_STATES: BadgeState[] = ["DEGRADED", "STALE", "RECONNECTING", "RESYNCING", "PAUSED"];
+
+export function gapStart(badgeState: BadgeState, lastConfirmedAt: number | null): number | null {
+    return NO_DATA_STATES.includes(badgeState) ? lastConfirmedAt : null;
+}
+
+export function isGapBucket(bucketStart: number, gapFrom: number | null): boolean {
+    return gapFrom !== null && bucketStart >= gapFrom;
 }

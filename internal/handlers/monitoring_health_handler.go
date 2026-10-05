@@ -9,6 +9,7 @@ import (
 	alerts "MTL_Scheduler_PII_Test/internal/alerting"
 	"MTL_Scheduler_PII_Test/internal/database"
 	"MTL_Scheduler_PII_Test/internal/freshness"
+	"MTL_Scheduler_PII_Test/internal/live"
 	"MTL_Scheduler_PII_Test/internal/models"
 	pii "MTL_Scheduler_PII_Test/internal/pii"
 )
@@ -48,7 +49,8 @@ type MonitoringHealthResponse struct {
 	// (pii.LoadedPolicy is a single atomic.Pointer, process-wide), so there
 	// is nothing for a version to drift FROM. This field exists so the UI
 	// can say so explicitly rather than silently omitting the row.
-	ScannerDrift string `json:"scanner_drift"`
+	ScannerDrift string     `json:"scanner_drift"`
+	LivePipeline live.Stats `json:"live_pipeline"`
 
 	KnownGaps []string `json:"known_gaps"`
 
@@ -154,6 +156,7 @@ func GetMonitoringHealth(c *gin.Context) {
 		LastReloadFailureReason: lastActivation.FailureReason,
 
 		ScannerDrift: "N/A",
+		LivePipeline: live.Snapshot(),
 		KnownGaps:    knownGaps,
 
 		Freshness: freshness.FreshnessFrom(newestOverall),

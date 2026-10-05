@@ -18,15 +18,13 @@ const (
 	reclaimInterval      = 15 * time.Second
 )
 
-// StartReclaimer periodically scans the consumer group's pending entries
-// and reclaims any message that's been idle too long.
 // RFC-003 §6 Delivery Lifecycle, abnormal branch: CLAIMED -> worker disappears -> pending/reclaim candidate -> REDELIVERED
 // RFC-004 §14 Failure Semantics: "Process crashes... Observed facts may instead be: last execution heartbeat = old, worker heartbeat = missing, Redis pending entry = still present." XAutoClaim is how this project detects that condition
 func StartReclaimer(ctx context.Context, reclaimer_id string) {
 
 	rdb := cache.Client
 
-	workerStruct := CreateWorker(ctx, reclaimer_id)
+	workerStruct := CreateComponent(ctx, reclaimer_id, "Reclaimer")
 	workerInstId := workerStruct.InstanceId
 	fmt.Println(workerInstId)
 
@@ -64,6 +62,14 @@ func StartReclaimer(ctx context.Context, reclaimer_id string) {
 				fmt.Println("Error parsing string (RECLAIMER EVENT):", ok)
 				continue
 			}
+			// RFC-001 §6 / RFC-004 §14: only take the task over when the worker that owns its unfinished attempt
+			// is really gone. If it still looks alive, leave the message pending (do NOT acknowledge it): the
+			// worker will acknowledge it when it finishes, or a later pass will find it gone and recover it.
+			if !prepareRecovery(ctx, JobId) {
+				slog.Info("reclaim deferred: the owning worker still looks alive, leaving the message pending", "job_id", JobId)
+				continue
+			}
+
 			// RFC-005 §11 Lost Detection: this event is the durable evidence of a recovered/possibly-lost attempt, logged before reprocessing begins so detection time is captured accurately
 			events.LogEvent(ctx, JobId, "task.recovery_started", "reclaimer")
 

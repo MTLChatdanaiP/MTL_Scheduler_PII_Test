@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"MTL_Scheduler_PII_Test/internal/cache"
@@ -13,7 +14,27 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const queuehealthInterval = 20 * time.Second //random time lol
+const (
+	queuehealthInterval      = 20 * time.Second //random time lol
+	degradedPendingThreshold = 20
+)
+
+var (
+	queueStatusMu   sync.Mutex
+	lastQueueStatus = make(map[string]string) // queueName -> "healthy" | "degraded"
+
+	// RFC-010 §20: previous consumer count per queue, used only to detect the
+	// crossing to and from zero -- never displayed anywhere itself.
+	consumerCountMu   sync.Mutex
+	lastConsumerCount = make(map[string]int)
+)
+
+func queueStatusFor(q models.QueueHealth) string {
+	if q.PendingCount > degradedPendingThreshold {
+		return "degraded"
+	}
+	return "healthy"
+}
 
 // RFC-003 §10 Pending Delivery Monitoring / §11 Queue Health Signals: raw
 // facts about the stream/consumer group, exposed for Monitoring to interpret
@@ -93,6 +114,34 @@ func StartQueueHealth(ctx context.Context) {
 			}
 			time.Sleep(queuehealthInterval)
 			continue
+		}
+
+		newStatus := queueStatusFor(QueueHealth)
+
+		queueStatusMu.Lock()
+		oldStatus, seen := lastQueueStatus[QueueHealth.QueueName]
+		lastQueueStatus[QueueHealth.QueueName] = newStatus
+		queueStatusMu.Unlock()
+
+		if seen && oldStatus != newStatus {
+			events.LogEvent(ctx, QueueHealth.QueueName, "queue."+newStatus, "queue-monitor")
+		}
+
+		// RFC-010 §20: QUEUE_NO_CONSUMER is in the critical tier. A queue with
+		// zero consumers is not draining at all, which is materially different
+		// from merely "degraded". Only the CROSSING is published -- a queue
+		// that legitimately sits idle with no consumers produces one event,
+		// not one per sample.
+		consumerCountMu.Lock()
+		previousConsumers, consumersSeen := lastConsumerCount[QueueHealth.QueueName]
+		lastConsumerCount[QueueHealth.QueueName] = QueueHealth.ConsumerCount
+		consumerCountMu.Unlock()
+
+		if consumersSeen && previousConsumers > 0 && QueueHealth.ConsumerCount == 0 {
+			events.LogEvent(ctx, QueueHealth.QueueName, "queue.no_consumer", "queue-monitor")
+		}
+		if consumersSeen && previousConsumers == 0 && QueueHealth.ConsumerCount > 0 {
+			events.LogEvent(ctx, QueueHealth.QueueName, "queue.consumer_restored", "queue-monitor")
 		}
 
 		time.Sleep(queuehealthInterval)

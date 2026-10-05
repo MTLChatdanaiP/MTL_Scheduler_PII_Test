@@ -4,6 +4,7 @@
     import { getWorkers, type WorkerListItem } from "../lib/api";
     import { deriveState, errorMessage } from "../lib/dataState";
     import DataStateBanner from "../lib/DataStateBanner.svelte";
+    import { workerRefreshTick } from "../lib/liveRefreshStores";
 
     // Two thresholds, not one -- is_stale alone is a 2-state signal
     // (fresh/stale), but the RFC wants 3 (online/degraded/offline). A worker
@@ -34,7 +35,6 @@
         try {
             const res = await getWorkers();
             workers = res.workers;
-            console.log("workers loaded:", workers.length, workers);
             error = null;
         } catch (e) {
             error = e;
@@ -51,9 +51,18 @@
         }, 10000);
     });
 
-    onDestroy(() => clearInterval(refreshTimer));
+    onDestroy(() => {
+        clearInterval(refreshTimer);
+    });
 
     $: state = deriveState({ hasLoadedOnce, isFetching, error, isEmpty: false });
+
+    // RFC-009 S17 / RFC-010 S22: one shared connection per PAGE (see Workers.svelte/Queues.svelte) bumps this; every component on the page reloads.
+    let lastTick = 0;
+    $: if ($workerRefreshTick !== lastTick) {
+        lastTick = $workerRefreshTick;
+        if (lastTick > 0) loadWorkers();
+    }
 
     $: onlineCount = workers.filter(w => workerStatus(w) === "online").length;
     $: degradedCount = workers.filter(w => workerStatus(w) === "degraded").length;

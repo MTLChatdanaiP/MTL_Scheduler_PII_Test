@@ -192,8 +192,10 @@
         return id.length > 12 ? `${id.slice(0, 8)}…` : id;
     }
 
-    async function copyId(id: string, e: MouseEvent) {
-        e.stopPropagation();
+    // MouseEvent | KeyboardEvent: this same handler fires from both a click
+    // and an Enter/Space keydown, so it must accept either.
+    async function copyId(id: string, e: MouseEvent | KeyboardEvent) {
+        e.stopPropagation(); // do not also toggle the row this span sits inside
         await navigator.clipboard.writeText(id);
     }
 
@@ -333,7 +335,19 @@
         {#each rows as row (row.JobId)}
             <div class="run-row clickable" on:click={() => toggleExpanded(row)} role="button" tabindex="0" on:keydown={(e) => e.key === "Enter" && toggleExpanded(row)}>
                 <span class="run-id-cell">
-                    <span class="copyable" title={row.JobId} on:click={(e) => copyId(row.JobId, e)}>{shortId(row.JobId)}</span>
+                    <span
+                        class="copyable"
+                        title={row.JobId}
+                        role="button"
+                        tabindex="0"
+                        on:click={(e) => copyId(row.JobId, e)}
+                        on:keydown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                copyId(row.JobId, e);
+                            }
+                        }}
+                    >{shortId(row.JobId)}</span>
                     {#if row.RetryIndex > 0}
                         <span class="retry-indicator">↳ retry of {shortId(row.ParentRunId)}</span>
                     {/if}

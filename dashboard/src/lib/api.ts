@@ -1,6 +1,11 @@
 const BASE_URL = "http://localhost:8080";
 const API_KEY = "dev-local-key-changeme";
 
+// RFC-009 §23: every request that goes through this file is timed and
+// counted here, keyed by endpoint PATTERN (see telemetry.ts), never by the
+// literal called URL.
+import { recordApiCall } from "./telemetry";
+
 // ---------------------------------------------------------------- Alert
 
 export interface Alert {
@@ -307,6 +312,58 @@ export interface PIIListResponse {
 export function getPIIFindings(params: string = ""): Promise<PIIListResponse> {
     return apiFetch(`/pii/findings${params}`);
 }
+
+// ---------------------------------------------------------------- PII Policy Dashboard (RFC-006 §31)
+
+export interface PolicyActivationItem {
+    PolicyName: string;
+    PolicyVersion: number;
+    Result: string;
+    FailureReason: string;
+    ActivatedAt: string;
+    Trigger: string;
+}
+
+export interface PolicyHistoryResponse {
+    activations: PolicyActivationItem[];
+}
+
+export function getPolicyHistory(): Promise<PolicyHistoryResponse> {
+    return apiFetch(`/pii/policy/history`);
+}
+
+export interface PolicyRuleSummary {
+    id: string;
+    priority: number;
+    sources: string[];
+    pii_types: string[];
+    action_type: string;
+    mask_strategy?: string;
+}
+
+export interface PolicyRulesResponse {
+    rules: PolicyRuleSummary[];
+}
+
+export function getPolicyRules(): Promise<PolicyRulesResponse> {
+    return apiFetch(`/pii/policy/rules`);
+}
+
+export interface PolicyDetectorSummary {
+    id: string;
+    pii_type: string;
+    type: string;
+    enabled: boolean;
+    minimum_confidence: number;
+}
+
+export interface PolicyDetectorsResponse {
+    detectors: PolicyDetectorSummary[];
+}
+
+export function getPolicyDetectors(): Promise<PolicyDetectorsResponse> {
+    return apiFetch(`/pii/policy/detectors`);
+}
  
 
 // ---------------------------------------------------------------- Monitoring health
@@ -409,17 +466,27 @@ async function apiPost<T>(path: string): Promise<T> {
 }
 
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
-    const res = await fetch(BASE_URL + path, {
-        ...options,
-        headers: { "X-API-Key": API_KEY, ...options.headers },
-    });
- 
-    if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new ApiError(body.error || `request failed: ${res.status}`, res.status);
+    const start = performance.now();
+    let ok = true;
+    try {
+        const res = await fetch(BASE_URL + path, {
+            ...options,
+            headers: { "X-API-Key": API_KEY, ...options.headers },
+        });
+
+        if (!res.ok) {
+            ok = false;
+            const body = await res.json().catch(() => ({}));
+            throw new ApiError(body.error || `request failed: ${res.status}`, res.status);
+        }
+
+        return await res.json();
+    } catch (e) {
+        ok = false;
+        throw e;
+    } finally {
+        recordApiCall(path, ok, performance.now() - start);
     }
- 
-    return res.json();
 }
 
 export class ApiError extends Error {
@@ -431,15 +498,28 @@ export class ApiError extends Error {
 }
 
 export async function apiStream(path: string, signal: AbortSignal): Promise<Response> {
-    const res = await fetch(BASE_URL + path, {
-        headers: { "X-API-Key": API_KEY, Accept: "text/event-stream" },
-        signal,
-    });
+    // Only the connection-open leg is timed here -- the stream itself is
+    // long-lived, and its health (disconnects) is tracked separately via
+    // recordLiveState, called from the component that owns the connection.
+    const start = performance.now();
+    let ok = true;
+    try {
+        const res = await fetch(BASE_URL + path, {
+            headers: { "X-API-Key": API_KEY, Accept: "text/event-stream" },
+            signal,
+        });
 
-    if (!res.ok || !res.body) {
-        const body = await res.json().catch(() => ({}));
-        throw new ApiError(body.error || `request failed: ${res.status}`, res.status);
+        if (!res.ok || !res.body) {
+            ok = false;
+            const body = await res.json().catch(() => ({}));
+            throw new ApiError(body.error || `request failed: ${res.status}`, res.status);
+        }
+
+        return res;
+    } catch (e) {
+        ok = false;
+        throw e;
+    } finally {
+        recordApiCall(path, ok, performance.now() - start);
     }
-
-    return res;
 }

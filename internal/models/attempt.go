@@ -24,5 +24,5 @@ type Attempt struct {
 	ClaimedAt       time.Time
 	StartedAt       time.Time
 	FinishedAt      time.Time
-	FailureCategory string // empty unless Status == "Failed"
+	FailureCategory string // set whenever Status == "Failed": one of the RFC-001 §14 categories (see failure_category.go)
 }

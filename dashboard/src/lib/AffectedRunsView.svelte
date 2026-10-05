@@ -11,6 +11,11 @@
     let loading = true;
     let error: string | null = null;
 
+    // See TimelineView.svelte for why this matters: without moving focus
+    // into the dialog on open, Escape does nothing until the user clicks
+    // inside the panel first.
+    let panelEl: HTMLDivElement;
+
     
 
     async function load() {
@@ -33,15 +38,23 @@
         }
     }
 
-    onMount(load);
+    onMount(() => {
+        panelEl?.focus();
+        load();
+    });
 
     function shortId(id: string): string {
         return id.length > 12 ? `${id.slice(0, 8)}…` : id;
     }
 </script>
 
-<div class="overlay" on:click={onClose} role="presentation">
-    <div class="panel" on:click|stopPropagation role="dialog" aria-label="Runs affected by queue" tabindex="-1">
+<div
+    class="overlay"
+    on:click={onClose}
+    on:keydown={(e) => e.key === "Escape" && onClose()}
+    role="presentation"
+>
+    <div class="panel" bind:this={panelEl} on:click|stopPropagation on:keydown={() => {}} role="dialog" aria-label="Runs affected by queue" tabindex="-1">
         <div class="panel-header">
             <h3>Affected Runs — {queueName ?? scheduleId}</h3>
             <button class="close-btn" on:click={onClose}>✕</button>

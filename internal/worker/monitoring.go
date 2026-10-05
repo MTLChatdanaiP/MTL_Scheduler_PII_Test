@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"MTL_Scheduler_PII_Test/internal/database"
+	"MTL_Scheduler_PII_Test/internal/events"
 	"MTL_Scheduler_PII_Test/internal/models"
 
 	"github.com/oklog/ulid/v2"
@@ -19,7 +21,54 @@ const (
 	monitoringInterval             = 20 * time.Second
 	workerHeartbeatFreshnessWindow = 30 * time.Second
 	missedOccurrenceThreshold      = 5 * time.Minute
+	workerDegradedAfter            = 60 * time.Second
+	workerOfflineAfter             = 300 * time.Second
 )
+
+var (
+	workerStatusMu   sync.Mutex
+	lastWorkerStatus = make(map[string]string) // workerId -> "online" | "degraded" | "offline"
+)
+
+func checkWorkerStatusTransitions(ctx context.Context) error {
+	var heartbeats []models.WorkerHeartbeat
+	if err := database.DB.WithContext(ctx).Order("occurred_at DESC").Find(&heartbeats).Error; err != nil {
+		fmt.Println("Failed to query worker heartbeats for status check:", err)
+		return err
+	}
+
+	seenWorker := make(map[string]bool)
+
+	for _, hb := range heartbeats {
+		if seenWorker[hb.WorkerId] {
+			continue
+		}
+		seenWorker[hb.WorkerId] = true
+
+		newStatus := workerStatusFor(time.Since(hb.OccurredAt))
+
+		workerStatusMu.Lock()
+		oldStatus, seen := lastWorkerStatus[hb.WorkerId]
+		lastWorkerStatus[hb.WorkerId] = newStatus
+		workerStatusMu.Unlock()
+
+		if seen && oldStatus != newStatus {
+			events.LogEvent(ctx, hb.WorkerId, "worker."+newStatus, "monitoring-sweep")
+		}
+	}
+
+	return nil
+}
+
+func workerStatusFor(age time.Duration) string {
+	if age > workerOfflineAfter {
+		return "offline"
+	}
+	if age > workerDegradedAfter {
+		return "degraded"
+	}
+	return "online"
+}
 
 // ---------- Sweep entry point ----------
 
@@ -37,6 +86,10 @@ func StartMonitoringSweep(ctx context.Context) {
 			checkLostTasks,
 			checkDuplicateExecution,
 			checkScheduleDrift,
+			checkWorkerStatusTransitions,
+			// RFC-010 §7: the two resource classes that had no live signal
+			checkComponentInstanceTransitions,
+			checkMonitoringHealthTransitions,
 		}
 
 		for _, check := range checks {
@@ -45,7 +98,7 @@ func StartMonitoringSweep(ctx context.Context) {
 			}
 		}
 
-		totalChecks := 4
+		totalChecks := len(checks)
 		status := "DEGRADED"
 
 		switch {
@@ -62,7 +115,7 @@ func StartMonitoringSweep(ctx context.Context) {
 		health_sample := models.MonitoringHealth{
 			Status:       status,
 			FailedChecks: failedChecks,
-			SampledAt:    time.Now(),
+			SampledAt:    time.Now().UTC(),
 		}
 
 		if err := database.DB.WithContext(ctx).Create(&health_sample).Error; err != nil {
@@ -243,6 +296,14 @@ func checkLostTasks(ctx context.Context) error {
 					fmt.Println("Failed to create monitoring annotation for task:", task.JobId, err)
 					continue
 				}
+
+				// RFC-010 §20: RUN_LOST is named in the "critical operational
+				// change" tier, but until now this detector only wrote the
+				// annotation row -- nothing announced it, so a lost run was
+				// invisible on the live feed until somebody happened to reload a
+				// page. Published inside the not-found branch, so a run that stays
+				// lost across many sweeps produces one event, not one per sweep.
+				events.LogEvent(ctx, task.JobId, "run.lost", "monitoring-sweep")
 			}
 		}
 	}
@@ -268,7 +329,6 @@ func resolveClearedAnnotations(ctx context.Context, annotationType string) {
 
 		err := database.DB.WithContext(ctx).
 			Where("job_id = ?", annotation.SubjectID).
-			Order("occurred_at DESC").
 			First(&task).Error
 
 		if err != nil {
@@ -414,6 +474,8 @@ func checkScheduleDrift(ctx context.Context) error {
 				fmt.Println("Failed to create monitoring annotation for schedule:", sched.ScheduleId, err)
 				continue
 			}
+
+			events.LogEvent(ctx, sched.ScheduleId, "schedule.missed", "monitoring-sweep")
 		}
 	}
 	return nil
@@ -433,6 +495,8 @@ func resolveScheduleDriftAnnotations(ctx context.Context) {
 			now := time.Now().UTC()
 			a.ResolvedAt = &now
 			database.DB.WithContext(ctx).Save(&a)
+
+			events.LogEvent(ctx, a.SubjectID, "schedule.recovered", "monitoring-sweep")
 		}
 	}
 }

@@ -17,8 +17,9 @@ type PIIRecord struct {
 	gorm.Model
 
 	// RFC-006 §17: run_id correlation field.
-	JobID string
-	Type  string
+	JobID     string
+	AttemptID string
+	Type      string
 
 	// Detection metadata.
 	DetectorID string

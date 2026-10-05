@@ -10,7 +10,11 @@ import (
 type Task struct {
 	gorm.Model
 	// PRD §9 Job Identity Requirements — ULID used as the stable, sortable job/run identifier
-	JobId    string // job id
+	JobId string // job id
+
+	// RFC-001 §2 Goals: "tolerate duplicate COMMAND signals"
+	IdempotencyKey *string `gorm:"uniqueIndex"`
+
 	TaskName string // task name
 	TaskType string // task type
 	Payload  string // payload

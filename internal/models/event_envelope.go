@@ -26,8 +26,12 @@ type EventEnvelope struct {
 	//RunID                string `json:"run_id"`
 	ParentRunID string `json:"parent_run_id"`
 	RetryIndex  int    `json:"retry_index"`
-	//AttemptID            string `json:"attempt_id"`
-	///WorkerID             string `json:"worker_id"`
+
+	// RFC-004 §8 Execution Heartbeat: "attempt_id, worker_id, occurred_at, optional_progress" --
+	// only populated on an attempt.heartbeat event; every other event leaves these empty.
+	AttemptID string `json:"attempt_id,omitempty"`
+	WorkerID  string `json:"worker_id,omitempty"`
+
 	//ScheduleID           string `json:"schedule_id"`
 	//ScheduleOccurrenceID string `json:"schedule_occurrence_id"`
 	//QueueName            string `json:"queue_name"`

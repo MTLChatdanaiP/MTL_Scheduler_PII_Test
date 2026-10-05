@@ -44,11 +44,21 @@ func MarkAttemptAbandoned(ctx context.Context, attempt *models.Attempt) {
 	database.DB.WithContext(ctx).Save(attempt)
 }
 
+// MarkAttemptAbandonedFor abandons an attempt whose ownership was lost and records why
+// (RFC-001 §6: ABANDONED is for lost ownership; §14: the cause is usually WORKER_FAILURE).
+func MarkAttemptAbandonedFor(ctx context.Context, attempt *models.Attempt, category string) {
+	attempt.Status = "Abandoned"
+	attempt.FinishedAt = time.Now().UTC()
+	attempt.FailureCategory = models.NormalizeFailureCategory(category)
+	database.DB.WithContext(ctx).Save(attempt)
+}
+
 func MarkAttemptFailed(ctx context.Context, attempt *models.Attempt, category string) {
 	// RFC-001 §9 Commands: MarkAttemptFailed
 	attempt.Status = "Failed"
 	attempt.FinishedAt = time.Now().UTC()
-	attempt.FailureCategory = category
+	// RFC-001 §14: a failed attempt always carries a real category; empty/unknown becomes UNKNOWN
+	attempt.FailureCategory = models.NormalizeFailureCategory(category)
 	database.DB.WithContext(ctx).Save(attempt)
 }
 

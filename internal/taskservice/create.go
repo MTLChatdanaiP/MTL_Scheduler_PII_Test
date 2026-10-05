@@ -20,6 +20,15 @@ import (
 
 func CreateTask_Direct(ctx context.Context, task models.Task) models.Task {
 
+	// RFC-001 §2 Goals: tolerate duplicate command signals
+	if task.IdempotencyKey != nil && *task.IdempotencyKey != "" {
+		var existing models.Task
+		if err := database.DB.WithContext(ctx).Where("idempotency_key = ?", *task.IdempotencyKey).First(&existing).Error; err == nil {
+			fmt.Println("duplicate command signal -- idempotency key already used, returning the original task:", existing.JobId)
+			return existing
+		}
+	}
+
 	// PRD §9 Job Identity Requirements: stable, sortable identifier generated at creation time, before the row is persisted
 	task.JobId = ulid.Make().String()
 	task.ExecutionChainId = task.JobId

@@ -4,6 +4,7 @@
     import { getRuns, getAlerts } from "../lib/api";
     import { deriveState, errorMessage } from "../lib/dataState";
     import DataStateBanner from "../lib/DataStateBanner.svelte";
+    import { overviewRefreshTick } from "../lib/liveRefreshStores";
  
     let hasLoadedOnce = false;
     let isFetching = false;
@@ -110,6 +111,16 @@
         error,
         isEmpty: false,   // cards always have a value, even if it's 0
     });
+
+    // RFC-010 §22: Overview starts ONE live connection for the whole page and
+    // bumps this; every card on it reloads instead of waiting for its own 10s
+    // poll. Same shape WorkerHealthCards/QueueHealthCards already use. Guarded
+    // on > 0 so the initial store value never triggers a duplicate first load.
+    let lastOverviewTick = 0;
+    $: if ($overviewRefreshTick !== lastOverviewTick) {
+        lastOverviewTick = $overviewRefreshTick;
+        if (lastOverviewTick > 0) loadCounts();
+    }
 </script>
 
 <h3>Run Health</h3>

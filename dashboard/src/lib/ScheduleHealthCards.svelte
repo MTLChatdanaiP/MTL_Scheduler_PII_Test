@@ -4,6 +4,7 @@
     import { getSchedules, getScheduleDetail, getAlerts, type ScheduleDefinition, type ScheduleDetailResponse } from "../lib/api";
     import { deriveState, errorMessage } from "../lib/dataState";
     import DataStateBanner from "../lib/DataStateBanner.svelte";
+    import { overviewRefreshTick } from "../lib/liveRefreshStores";
 
     // A start is "late" if the run actually started noticeably after its
     // expected time. 30s is a starting guess, not a value confirmed anywhere
@@ -67,6 +68,16 @@
     $: worstStartDrift = allRecentRuns.reduce((max, r) => {
         return r.start_drift_seconds !== null && r.start_drift_seconds > max ? r.start_drift_seconds : max;
     }, 0);
+
+    // RFC-010 §22: Overview starts ONE live connection for the whole page and
+    // bumps this; every card on it reloads instead of waiting for its own 10s
+    // poll. Same shape WorkerHealthCards/QueueHealthCards already use. Guarded
+    // on > 0 so the initial store value never triggers a duplicate first load.
+    let lastOverviewTick = 0;
+    $: if ($overviewRefreshTick !== lastOverviewTick) {
+        lastOverviewTick = $overviewRefreshTick;
+        if (lastOverviewTick > 0) loadSchedules();
+    }
 </script>
 
 <h3>Schedule Health</h3>

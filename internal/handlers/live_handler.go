@@ -87,9 +87,18 @@ func GetLive(serverCtx context.Context, prefixes ...string) gin.HandlerFunc {
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 
+		// RFC-010 §15 Subscription Scopes: a client may narrow itself to ONE
+		// resource (?subject=worker-a) instead of receiving every event of the
+		// types it is authorized for. Absent means no narrowing -- exactly
+		// today's behaviour for every existing caller.
+		//
+		// This filters what is DELIVERED, not what is authorized: canSee still
+		// applies on top, so narrowing can never widen access.
+		subjectFilter := c.Query("subject")
+
 		// Subscribe BEFORE replaying. Anything published while the replay
 		// query runs lands in the channel instead of falling into a gap.
-		ch := live.GlobalHub.Subscribe()
+		ch := live.GlobalHub.SubscribeFiltered(subjectFilter)
 		defer live.GlobalHub.Unsubscribe(ch)
 
 		w.Write([]byte(": connected\n\n"))
@@ -130,6 +139,7 @@ func GetLive(serverCtx context.Context, prefixes ...string) gin.HandlerFunc {
 			} else if len(rows) > replayCap {
 				w.Write([]byte("event: resync\ndata: {}\n\n"))
 				flusher.Flush()
+				live.CountResync()
 			} else {
 				for _, r := range rows {
 					writeSSE(w, flusher, live.Event{
@@ -137,6 +147,7 @@ func GetLive(serverCtx context.Context, prefixes ...string) gin.HandlerFunc {
 					})
 					delivered[r.ID] = true
 				}
+				live.CountReplay(len(rows))
 			}
 		}
 
@@ -153,6 +164,7 @@ func GetLive(serverCtx context.Context, prefixes ...string) gin.HandlerFunc {
 			case <-heartbeat.C:
 				w.Write([]byte(": ping\n\n"))
 				flusher.Flush()
+				live.MarkHeartbeat()
 			case e, open := <-ch:
 				if !open {
 					return
@@ -160,7 +172,15 @@ func GetLive(serverCtx context.Context, prefixes ...string) gin.HandlerFunc {
 				if !matchesPrefix(e.Type, prefixes) || !canSee(e.Type) || delivered[e.ID] {
 					continue
 				}
+				// Defence in depth: the hub already filters by subject, but a
+				// replayed event takes a different path into this loop.
+				if subjectFilter != "" && e.Subject != subjectFilter {
+					continue
+				}
 				writeSSE(w, flusher, e)
+				if !e.At.IsZero() {
+					live.ObserveDeliveryLag(time.Since(e.At))
+				}
 			}
 		}
 	}

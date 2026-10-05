@@ -2,4 +2,4 @@
     import ActivityFeed from "../lib/ActivityFeed.svelte";
 </script>
 
-<ActivityFeed listHeight={700} />
+<ActivityFeed listHeight={700} syncUrl={true} />

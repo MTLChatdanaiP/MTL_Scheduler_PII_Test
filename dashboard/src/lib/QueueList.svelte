@@ -6,6 +6,8 @@
     import JsonTree from "../lib/JsonTree.svelte";
     import { deriveState, errorMessage } from "../lib/dataState";
     import DataStateBanner from "../lib/DataStateBanner.svelte";
+    import { queueRefreshTick } from "../lib/liveRefreshStores";
+    import { currentPath, parsePath, updateParams } from "../lib/router";
  
     let hasLoadedOnce = false;
     let isFetching = false;
@@ -24,6 +26,37 @@
     let detailError: string | null = null;
 
     let affectedRunsQueue: string | null = null;
+
+    let queueNameFilter = "";
+    let statusFilter: "" | "healthy" | "degraded" = "";
+    let zeroConsumersOnly = false;
+
+    let unsubscribePath: (() => void) | undefined;
+
+    function syncFiltersFromUrl() {
+        const { params } = parsePath($currentPath);
+        queueNameFilter = params.get("queue_name") ?? "";
+        statusFilter = (params.get("status") as typeof statusFilter) ?? "";
+        zeroConsumersOnly = params.get("zero_consumers") === "true";
+    }
+
+    function commitFilters() {
+        updateParams({
+            queue_name: queueNameFilter,
+            status: statusFilter,
+            zero_consumers: zeroConsumersOnly ? "true" : "",
+        });
+    }
+
+    // Small set, filtered client-side -- same reasoning as WorkerList (RFC-009
+    // S9/S16: filter in the browser for small sets, move server-side if the
+    // number of queues grows).
+    $: visibleQueues = queues.filter((q) => {
+        if (queueNameFilter && !q.QueueName.toLowerCase().includes(queueNameFilter.toLowerCase())) return false;
+        if (statusFilter && (isDegraded(q) ? "degraded" : "healthy") !== statusFilter) return false;
+        if (zeroConsumersOnly && q.ConsumerCount !== 0) return false;
+        return true;
+    });
 
     async function computeTrend(queueName: string) {
         try {
@@ -76,14 +109,30 @@
         isEmpty: queues.length === 0,
     });
 
+    // RFC-009 S17 / RFC-010 S22: one shared connection per PAGE (see Workers.svelte/Queues.svelte) bumps this; every component on the page reloads.
+    let lastTick = 0;
+    $: if ($queueRefreshTick !== lastTick) {
+        lastTick = $queueRefreshTick;
+        if (lastTick > 0) loadQueues();
+    }
+
     onMount(() => {
+        syncFiltersFromUrl();
+
+        unsubscribePath = currentPath.subscribe(() => {
+            syncFiltersFromUrl();   // no refetch needed, visibleQueues is reactive
+        });
+
         loadQueues();
         refreshTimer = setInterval(() => {
             if ($autoRefreshEnabled) loadQueues();
         }, 10000);
     });
 
-    onDestroy(() => clearInterval(refreshTimer));
+    onDestroy(() => {
+        unsubscribePath?.();
+        clearInterval(refreshTimer);
+    });
 
     async function toggleExpanded(queueName: string) {
         if (expandedQueue === queueName) {
@@ -121,6 +170,25 @@
     }
 </script>
 
+<div class="filter-bar">
+    <label>
+        Queue name:
+        <input type="text" bind:value={queueNameFilter} placeholder="e.g. tasks:stream" on:change={commitFilters} />
+    </label>
+    <label>
+        Status:
+        <select bind:value={statusFilter} on:change={commitFilters}>
+            <option value="">All</option>
+            <option value="healthy">Healthy</option>
+            <option value="degraded">Degraded</option>
+        </select>
+    </label>
+    <label class="checkbox-label">
+        <input type="checkbox" bind:checked={zeroConsumersOnly} on:change={commitFilters} />
+        Zero consumers only
+    </label>
+</div>
+
 <div class="queue-table">
     <div class="queue-row header">
         <span>Queue</span>
@@ -140,7 +208,7 @@
         <p class="status error">{error}</p>
     {:else}
         {#if state === "READY" || state === "REFRESHING"}
-            {#each queues as q (q.QueueName)}
+            {#each visibleQueues as q (q.QueueName)}
                 <div
                     class="queue-row clickable"
                     on:click={() => toggleExpanded(q.QueueName)}
@@ -193,6 +261,8 @@
         {/if}
         {#if queues.length === 0}
             <p class="status">No queues found.</p>
+        {:else if visibleQueues.length === 0}
+            <p class="status">No queues match the current filters.</p>
         {/if}
     {/if}
 </div>
@@ -202,6 +272,11 @@
 {/if}
 
 <style>
+    .filter-bar { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; padding: 12px 0; }
+    .filter-bar label { display: flex; flex-direction: column; font-size: 12px; gap: 4px; }
+    .filter-bar input, .filter-bar select { padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; }
+    .filter-bar .checkbox-label { flex-direction: row; align-items: center; gap: 6px; }
+
     .queue-table { margin-top: 12px; border: 1px solid #ddd; border-radius: 8px; overflow-x: auto; }
     .queue-row {
         display: grid;

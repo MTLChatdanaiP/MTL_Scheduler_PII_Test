@@ -4,6 +4,7 @@
     import { getMonitoringHealth, type MonitoringHealthResponse } from "../lib/api";
     import { deriveState, errorMessage } from "../lib/dataState";
     import DataStateBanner from "../lib/DataStateBanner.svelte";
+    import { overviewRefreshTick } from "../lib/liveRefreshStores";
 
     let data: MonitoringHealthResponse | null = null;
     let error: unknown = null;
@@ -44,6 +45,16 @@
     function fmtLag(s: SubsystemFreshnessLike): string {
         if (!s || !s.available) return "unavailable";
         return `${s.lag_seconds!.toFixed(0)}s ago`;
+    }
+
+    // RFC-010 §22: Overview starts ONE live connection for the whole page and
+    // bumps this; every card on it reloads instead of waiting for its own 10s
+    // poll. Same shape WorkerHealthCards/QueueHealthCards already use. Guarded
+    // on > 0 so the initial store value never triggers a duplicate first load.
+    let lastOverviewTick = 0;
+    $: if ($overviewRefreshTick !== lastOverviewTick) {
+        lastOverviewTick = $overviewRefreshTick;
+        if (lastOverviewTick > 0) load();
     }
 </script>
 

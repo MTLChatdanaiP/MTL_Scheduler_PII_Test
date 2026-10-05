@@ -31,6 +31,24 @@ const (
 // RFC-003 §4 Redis Primitive: consumer group name — enables competing-consumer distribution across this worker and the reclaimer
 const WorkerGroupA = "WorkerG_A"
 
+// RFC-001 §2 Goals / §11 Retry Semantics: retries must be bounded. Before this,
+// RetryIndex incremented forever with nothing checking it -- a genuinely failing
+// handler retried every 10s with no end. The test fixture only ever looked
+// finite because it resets its own TaskType to one that succeeds after one retry,
+// which is a property of the test, not a real cap.
+const maxRetries = 3
+
+// RFC-006 §24 The scanning pipeline itself is indifferent to where the
+// text came from -- the moment a handler returns real output, pass it instead.
+func handlerArtifact(task models.Task, category string) string {
+	return "task " + task.TaskName + " (" + task.TaskType + ") failed: " + category + " | payload: " + task.Payload
+}
+
+// RFC-004 §8 Execution Heartbeat. A var, not a const, so a test can shorten it --
+// the real system has no handler that runs anywhere near this long today, so this
+// is the interval a FUTURE long-running handler would be observed at.
+var ExecutionHeartbeatInterval = 10 * time.Second
+
 // RFC-004 §9 Capacity: "active_attempts" — global total across all workers
 var activeAttempts int64
 var progressChunkDuration = 5 * time.Second
@@ -50,6 +68,8 @@ func runHandler(ctx context.Context, task models.Task) (ExecutionOutcome, string
 		return NonRetryableFailure, "TIMEOUT"
 	case "fail_permanent":
 		return NonRetryableFailure, "APPLICATION_ERROR"
+	case "fail_infrastructure":
+		return NonRetryableFailure, models.FailureInfrastructureError
 
 	//MISSING: WORKER_FAILURE        : belongs to a different code path, reclaimer already detects
 	//         INFRASTRUCTURE_ERROR  : real mechanism exists elsewhere, cache.IsUnavailable already classifies elsewhere, just not fed into FailureCategory yet
@@ -113,7 +133,26 @@ func ProcessTask(ctx context.Context, JobId string, workerId string) {
 	//change note status from "Pending" to "Running"
 	slog.Info("task started", "worker_id", workerId, "job_id", JobId)
 
+	// RFC-004 §8: a goroutine ticks out attempt.heartbeat events for as long as
+	// runHandler is still running, and stops the instant it returns, success or
+	// failure -- "a worker can be alive while one handler is stuck" is exactly the
+	// condition this makes observable that worker-level heartbeats cannot.
+	heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
+	go func() {
+		ticker := time.NewTicker(ExecutionHeartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-heartbeatCtx.Done():
+				return
+			case <-ticker.C:
+				events.LogExecutionHeartbeat(ctx, JobId, attempt.AttemptId, workerId)
+			}
+		}
+	}()
+
 	outcome, category := runHandler(ctx, task) //process the task if tasktype allows it
+	stopHeartbeat()
 
 	switch outcome {
 
@@ -147,8 +186,21 @@ func ProcessTask(ctx context.Context, JobId string, workerId string) {
 		}
 
 		//RFC-001 §5: "A failed parent run remains terminal after its retry child is created"
+		// RFC-006 §24: the worker's own error output is a candidate artifact and
+		// may contain PII the original payload never had. Scanned and sanitized
+		// BEFORE anything is persisted; the raw text never leaves this frame.
+		ScanAndPersistArtifact(ctx, JobId, attempt.AttemptId, "ERROR_MESSAGE", handlerArtifact(task, category))
+
 		events.MarkRunRetryableFailure(ctx, &task)
-		events.MarkAttemptAbandoned(ctx, &attempt)
+		// RFC-001 §6: ABANDONED is for lost ownership (transport recovery, see recovery.go);
+		// a handler that returned an error is a FAILED attempt, with its category.
+		events.MarkAttemptFailed(ctx, &attempt, category)
+
+		if task.RetryIndex >= maxRetries {
+			slog.Warn("retry limit reached, not creating another retry child", "job_id", task.JobId, "retry_index", task.RetryIndex, "max_retries", maxRetries)
+			events.LogEvent(ctx, task.JobId, "task.retries_exhausted", "worker")
+			return
+		}
 
 		// RFC-001 §7 Retry Lineage: a retry creates a NEW run — new JobId, same
 		// execution_chain_id, parent_run_id set to the failed run. The failed
@@ -168,6 +220,11 @@ func ProcessTask(ctx context.Context, JobId string, workerId string) {
 		database.DB.WithContext(ctx).Create(&retryTask)
 
 		events.LogEvent(ctx, retryTask.JobId, "task.created", "worker")
+		// RFC-006 §24: same for a permanent failure.
+		if outcome == NonRetryableFailure {
+			ScanAndPersistArtifact(ctx, JobId, attempt.AttemptId, "ERROR_MESSAGE", handlerArtifact(task, category))
+		}
+
 	// RFC-001 §9 Commands: MarkAttemptFailed + MarkRunFailed
 	case NonRetryableFailure:
 		events.MarkAttemptFailed(ctx, &attempt, category)
