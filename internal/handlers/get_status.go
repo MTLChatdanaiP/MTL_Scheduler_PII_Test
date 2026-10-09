@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"MTL_Scheduler_PII_Test/internal/database"
+	"MTL_Scheduler_PII_Test/internal/events"
 	"MTL_Scheduler_PII_Test/internal/freshness"
 	"MTL_Scheduler_PII_Test/internal/models"
 	"MTL_Scheduler_PII_Test/internal/pagination"
@@ -23,6 +24,11 @@ type WorkerListItem struct {
 	LastHeartbeat      time.Time
 	RunningAttempts    int
 	Capacity           int
+
+	// RFC-005 §7 Worker Projection. Additive; snake_case like the newer structs.
+	Health        string `json:"health"`        // HEALTHY | DEGRADED | OFFLINE | UNKNOWN
+	HealthReason  string `json:"health_reason"` // the numbers behind it
+	BuildRevision string `json:"build_revision"`
 }
 
 type WorkerDetailResponse struct {
@@ -117,6 +123,11 @@ func GetWorkers(c *gin.Context) {
 			item.RunningAttempts = heartbeat.RunningAttempts
 			item.Capacity = heartbeat.Capacity
 		}
+
+		// RFC-005 §7 Worker Projection "derived health": worked out here, with the SAME thresholds the monitoring sweep uses,
+		// instead of being left for the browser to re-derive
+		item.Health, item.HealthReason = models.InstanceHealth(models.ComponentInstance{LastSeenAt: item.LastHeartbeat}, time.Now().UTC(), models.HeartbeatDegradedAfter, models.HeartbeatOfflineAfter)
+		item.BuildRevision = worker.BuildRevision
 
 		result = append(result, item)
 	}
@@ -312,6 +323,11 @@ type ScheduleDetailResponse struct {
 	Annotations  []models.MonitoringAnnotation `json:"annotations"`
 	NextExpected *time.Time                    `json:"next_expected_at,omitempty"`
 
+	// RFC-002 §14 / RFC-005 §7: the occurrence ledger answers "what should have run recently" and "was a run created
+	// for each expected occurrence", including the occurrences that were SKIPPED and so have no run. Additive.
+	Projection  *models.ScheduleProjection  `json:"projection"`
+	Occurrences []models.ScheduleOccurrence `json:"occurrences"`
+
 	Freshness freshness.FreshnessInfo `json:"freshness"`
 	Live      freshness.LiveInfo      `json:"live"`
 }
@@ -428,11 +444,15 @@ func GetScheduleDetail(c *gin.Context) {
 		fmt.Println("failed to compute watermark:", err)
 	}
 
+	scheduleProjection, occurrences := events.LoadScheduleMonitoring(c.Request.Context(), schedule.ScheduleId, 50)
+
 	c.JSON(http.StatusOK, ScheduleDetailResponse{
 		Schedule:     schedule,
 		RecentRuns:   recentRuns,
 		Annotations:  annotations,
 		NextExpected: nextExpected,
+		Projection:   scheduleProjection,
+		Occurrences:  occurrences,
 
 		Freshness: freshnessInfo,
 		Live: freshness.LiveInfo{

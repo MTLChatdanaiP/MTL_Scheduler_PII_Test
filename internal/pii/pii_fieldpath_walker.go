@@ -63,11 +63,7 @@ func walkJSON(prefix string, data interface{}, scan func(path string, value stri
 	switch v := data.(type) {
 	case map[string]interface{}:
 		for key, val := range v {
-			path := key
-			if prefix != "" {
-				path = prefix + "." + key
-			}
-			walkJSON(path, val, scan)
+			walkJSON(jsonChildPath(prefix, key), val, scan)
 		}
 	case []interface{}:
 		for i, val := range v {
@@ -77,4 +73,22 @@ func walkJSON(prefix string, data interface{}, scan func(path string, value stri
 	case string:
 		scan(prefix, v)
 	}
+}
+
+// pathKeyEscaper escapes the characters that give a path its structure.
+var pathKeyEscaper = strings.NewReplacer(`\`, `\\`, ".", `\.`, "[", `\[`, "]", `\]`)
+
+// jsonChildPath returns the path of the member named key inside the object at prefix. walkJSON and the rewrite in
+// pii_fieldpath_caretaker.go both build paths with it, so they cannot disagree.
+//
+// A key that contains ".", "[", "]" or "\" is escaped. Without that, the key "a.b" and the nested {"a":{"b":...}} gave the SAME
+// path text, and findings are grouped and de-duplicated BY PATH: ResolveOverlaps saw two findings with the same path and
+// offsets, treated them as overlapping and dropped one, leaving that string unredacted and unrecorded. A crafted key could
+// therefore make a value escape. Keys without those characters (every ordinary key) produce exactly the path they always did.
+func jsonChildPath(prefix, key string) string {
+	key = pathKeyEscaper.Replace(key)
+	if prefix == "" {
+		return key
+	}
+	return prefix + "." + key
 }

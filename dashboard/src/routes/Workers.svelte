@@ -13,7 +13,9 @@
     onMount(() => {
         stopLiveRefresh = startLiveRefreshTrigger({
             prefixes: ["worker."],
+            scopes: ["workers"], // RFC-010 §15: the server sends only worker events, not the whole firehose
             onMatch: () => workerRefreshTick.update((n) => n + 1),
+            fallback: {}, // RFC-010 §27: poll (visibly, boundedly) if the live stream goes away
         });
     });
 
@@ -21,4 +23,4 @@
 </script>
 
 <WorkerHealthCards />
-<WorkerList />
+<WorkerList />

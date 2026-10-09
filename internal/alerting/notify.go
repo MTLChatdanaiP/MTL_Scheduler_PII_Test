@@ -168,6 +168,14 @@ func createNotifications(ctx context.Context, alert models.Alert) {
 	}
 }
 
+// failNotificationTerminal records a failure that retrying can never fix, by
+// exhausting the retry budget outright so the row stops matching the retry
+// query immediately.
+func failNotificationTerminal(ctx context.Context, n models.Notification, reason string) {
+	n.AttemptCount = maxNotificationAttempts
+	failNotification(ctx, n, reason)
+}
+
 func failNotification(ctx context.Context, n models.Notification, reason string) {
 	n.Status = "FAILED"
 	if len(reason) > maxLastErrorLength {
@@ -193,22 +201,34 @@ func sendPendingNotifications(ctx context.Context) {
 	}
 
 	for _, n := range pending {
+		// Count the attempt BEFORE any branch can fail.
+		//
+		// This loop re-selects FAILED rows whose attempt_count is still below
+		// the cap. Two of the failure paths below used to run before this
+		// increment, so their attempt_count never moved, they always matched
+		// the query again, and they retried every sweep forever -- which is
+		// what flooded the live feed with alert.notification_failed events.
+		n.AttemptCount++
+		now := time.Now().UTC()
+		n.LastAttemptAt = &now
+		database.DB.WithContext(ctx).Save(&n)
+
 		var alert models.Alert
 		if err := database.DB.WithContext(ctx).Where("alert_id = ?", n.AlertID).First(&alert).Error; err != nil {
-			failNotification(ctx, n, "alert no longer exists: "+n.AlertID)
+			// The alert is gone. No number of retries can bring it back, so
+			// this fails terminally rather than burning the retry budget.
+			failNotificationTerminal(ctx, n, "alert no longer exists: "+n.AlertID)
 			continue
 		}
 
 		adapter, ok := NotificationAdapters[n.Channel]
 		if !ok {
-			failNotification(ctx, n, "no adapter for channel "+n.Channel)
+			// A channel with no adapter is a configuration fact, not a
+			// transient condition -- also terminal.
+			failNotificationTerminal(ctx, n, "no adapter for channel "+n.Channel)
 			continue
 		}
 
-		n.AttemptCount++
-		now := time.Now().UTC()
-		n.LastAttemptAt = &now
-		database.DB.WithContext(ctx).Save(&n)
 		err := adapter.Send(ctx, alert)
 		if err != nil {
 			failNotification(ctx, n, err.Error())

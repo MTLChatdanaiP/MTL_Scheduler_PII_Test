@@ -51,7 +51,7 @@ func TestDetectJSON_OffsetBug(t *testing.T) {
 
 	payload := `{"email": "jane.doe@example.com", "ssn": "123-45-6789", "creditcard": "4111-1111-1111-1111", "supportPhone": "555-000-1111", "customers": [{"name": "John", "phone": "555-123-4567"}, {"name": "Amy", "phone": "555-987-6543"}]}`
 
-	evaluated, failed, ok := DetectJSON(payload, detectors, policy, "JOB_PAYLOAD", "CUSTOMER_UPDATE")
+	evaluated, failed, ok := DetectJSON(payload, detectors, policy, "JOB_PAYLOAD", "CUSTOMER_UPDATE", "")
 	if !ok {
 		t.Fatalf("payload should be valid JSON, DetectJSON returned ok=false")
 	}

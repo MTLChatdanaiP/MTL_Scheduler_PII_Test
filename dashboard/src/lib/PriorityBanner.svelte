@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { startRefresh } from "./refresh";
     import { onMount, onDestroy } from "svelte";
     import { autoRefreshEnabled } from "../lib/stores";
     import { getAlerts } from "../lib/api";
@@ -33,14 +34,12 @@
         }
     }
 
-    let refreshTimer: ReturnType<typeof setInterval>;
+    let stopRefresh: (() => void) | undefined;
     onMount(() => {
         load();
-        refreshTimer = setInterval(() => {
-            if ($autoRefreshEnabled) load();
-        }, 10000);
+        stopRefresh = startRefresh(load, { gaugeEveryMs: 30000 });
     });
-    onDestroy(() => clearInterval(refreshTimer));
+    onDestroy(() => stopRefresh?.());
 
     $: level = criticalCount > 0 ? "critical" : warningCount > 0 ? "warning" : "healthy";
 </script>

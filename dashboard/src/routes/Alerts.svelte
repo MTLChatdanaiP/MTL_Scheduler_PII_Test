@@ -1,4 +1,9 @@
 <script lang="ts">
+    import { activateOnKey } from "../lib/a11y";
+    import { latestOnly, isAbort } from "../lib/latestOnly";
+    import { startRefresh } from "../lib/refresh";
+    import { usePageLive } from "../lib/pageLive";
+    import { alertRefreshTick } from "../lib/liveRefreshStores";
     import { onMount, onDestroy } from "svelte";
     import { lastRefreshedAt, autoRefreshEnabled, timeRange, activeFilterCount } from "../lib/stores";
     import {
@@ -17,16 +22,18 @@
     import { currentPath, parsePath, updateParams } from "../lib/router";
     import JsonTree from "../lib/JsonTree.svelte";
     import AlertHealthCards from "../lib/AlertHealthCards.svelte";
+    import { ALERT_TYPES, alertTypeLabel } from "../lib/alertTypes";
 
     let alerts: AlertsResponse | null = null;
     let error: unknown = null;
-    let refreshTimer: ReturnType<typeof setInterval>;
+    let stopRefresh: (() => void) | undefined;
     let ready = false;
     let hasLoadedOnce = false;
     let isFetching = false;
 
     // --- BASIC FILTERS ---
     let severityFilter = "";
+    let alertTypeFilter = ""; // RFC-007 §4: the page had no way to ask for one alert type
     let statusFilter = "";
     let subjectTypeFilter = "";
     let subjectIdFilter = "";
@@ -49,6 +56,7 @@
     function syncFiltersFromUrl() {
         const { params } = parsePath($currentPath);
         severityFilter = params.get("severity") ?? "";
+        alertTypeFilter = params.get("alert_type") ?? "";
         statusFilter = params.get("status") ?? "";
         subjectTypeFilter = params.get("subject_type") ?? "";
         subjectIdFilter = params.get("subject_id") ?? "";
@@ -68,7 +76,29 @@
         }
     }
 
+    const latest = latestOnly();
+    let lastParams = "";
+    let loadingMore = false;
+
+    // Batch 7 (RFC-009 §20): the next page by cursor, appended to what is shown.
+    async function loadMore() {
+        const cursor = alerts?.page.next_cursor;
+        if (loadingMore || !alerts || !cursor) return;
+        loadingMore = true;
+        const req = latest.start();
+        try {
+            const next = await getAlerts(`?${lastParams}&cursor=${encodeURIComponent(cursor)}`, req.signal);
+            if (!req.isCurrent()) return;
+            alerts = { ...next, alerts: [...alerts.alerts, ...next.alerts] };
+        } catch (e) {
+            if (!isAbort(e) && req.isCurrent()) error = e;
+        } finally {
+            loadingMore = false;
+        }
+    }
+
     async function loadAlerts() {
+        const req = latest.start();
         isFetching = true;
         try {
             const params = new URLSearchParams();
@@ -83,6 +113,7 @@
 
             if (statusFilter) params.set("status", statusFilter);
             if (severityFilter) params.set("severity", severityFilter);
+            if (alertTypeFilter) params.set("alert_type", alertTypeFilter);
             if (subjectTypeFilter) params.set("subject_type", subjectTypeFilter);
             if (subjectIdFilter) params.set("subject_id", subjectIdFilter);
             if (ruleIdFilter) params.set("rule_id", ruleIdFilter);
@@ -90,7 +121,10 @@
 
             params.set("limit", "50");
 
-            alerts = await getAlerts(`?${params.toString()}`);
+            lastParams = params.toString();
+            const res = await getAlerts(`?${lastParams}`, req.signal);
+            if (!req.isCurrent()) return; // a newer search has started; this answer is stale
+            alerts = res;
 
             lastRefreshedAt.set(
                 alerts.freshness.last_updated_at
@@ -99,10 +133,13 @@
             );
             error = null;
         } catch (e) {
+            if (isAbort(e) || !req.isCurrent()) return;
             error = e;
         } finally {
-            isFetching = false;
-            hasLoadedOnce = true;
+            if (req.isCurrent()) {
+                isFetching = false;
+                hasLoadedOnce = true;
+            }
         }
     }
 
@@ -126,14 +163,15 @@
         ready = true;
         loadAlerts();
 
-        refreshTimer = setInterval(() => {
-            if ($autoRefreshEnabled) loadAlerts();
-        }, 10000);
+        stopRefresh = startRefresh(loadAlerts, { ticks: [alertRefreshTick], gaugeEveryMs: 30000 });
     });
+
+    // RFC-009 §17: the page used to poll every 10s with no live connection. The server answers 403 to a key without alerts.read.
+    usePageLive({ scope: "alerts", prefixes: ["alert."], tick: alertRefreshTick });
 
     onDestroy(() => {
         unsubscribePath?.();
-        clearInterval(refreshTimer);
+        stopRefresh?.();
     });
 
     // timeRange changing (the GlobalBar dropdown, not a URL paste) still
@@ -236,6 +274,16 @@
     </label>
 
     <label>
+        Alert type:
+        <select bind:value={alertTypeFilter} on:change={loadAlerts}>
+            <option value="">All</option>
+            {#each ALERT_TYPES as t (t)}
+                <option value={t}>{alertTypeLabel(t)}</option>
+            {/each}
+        </select>
+    </label>
+
+    <label>
         Subject type:
         <select bind:value={subjectTypeFilter} on:change={loadAlerts}>
             <option value="">All</option>
@@ -291,7 +339,7 @@
         </div>
 
         {#each alerts?.alerts ?? [] as alert (alert.alert_id)}
-            <div class="alert-row clickable" on:click={() => toggleExpanded(alert)} role="button" tabindex="0" on:keydown={(e) => e.key === "Enter" && toggleExpanded(alert)}>
+            <div class="alert-row clickable" on:click={() => toggleExpanded(alert)} role="button" tabindex="0" on:keydown={(e) => activateOnKey(e, () => toggleExpanded(alert))}>
                 <span class:critical={alert.severity === "CRITICAL"} class:warning={alert.severity === "WARNING"}>{alert.severity}</span>
                 <span>{alert.alert_type}</span>
                 <span class:open={alert.status === "OPEN"} class:resolved={alert.status === "RESOLVED"}>{alert.status}</span>
@@ -328,6 +376,9 @@
             {/if}
         {/each}
     </div>
+    {#if alerts?.page.next_cursor}
+        <button class="load-more" on:click={loadMore} disabled={loadingMore}>{loadingMore ? "Loading…" : "Load more"}</button>
+    {/if}
 {:else}
     <DataStateBanner {state} message={errorMessage(error)} />
 {/if}

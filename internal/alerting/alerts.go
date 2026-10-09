@@ -113,7 +113,7 @@ func openAlertsFromAnnotations(ctx context.Context) {
 			continue
 		}
 
-		events.LogEvent(ctx, alert.SubjectID, "alert.opened", "alerting")
+		events.LogEventWith(ctx, alert.SubjectID, "alert.opened", "alerting", events.EventContext{Severity: alert.Severity})
 
 		createNotifications(ctx, alert)
 	}
@@ -245,7 +245,7 @@ func openAlertsFromMetrics(ctx context.Context) {
 				continue
 			}
 
-			events.LogEvent(ctx, alert.SubjectID, "alert.opened", "alerting")
+			events.LogEventWith(ctx, alert.SubjectID, "alert.opened", "alerting", events.EventContext{Severity: alert.Severity})
 
 			createNotifications(ctx, alert)
 		}

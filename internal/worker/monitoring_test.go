@@ -116,8 +116,8 @@ func TestResolveClearedAnnotations_ResolvesOnCompletion(t *testing.T) {
 	var updated models.MonitoringAnnotation
 	database.DB.Where("subject_id = ?", task.JobId).First(&updated)
 
-	if updated.ResolvedAt != nil {
-		t.Error("expected ResolvedAt to be set, was still zero")
+	if updated.ResolvedAt == nil {
+		t.Error("expected ResolvedAt to be set, was still nil")
 	}
 }
 

@@ -1,7 +1,9 @@
 <script lang="ts">
+    import { startRefresh } from "./refresh";
+    import { runRefreshTick } from "./liveRefreshStores";
     import { onMount, onDestroy } from "svelte";
     import { autoRefreshEnabled, timeRange } from "../lib/stores";
-    import { getRuns, getAlerts } from "../lib/api";
+    import { getRuns, getAlerts, getOverview } from "../lib/api";
     import { deriveState, errorMessage } from "../lib/dataState";
     import DataStateBanner from "../lib/DataStateBanner.svelte";
     import { overviewRefreshTick } from "../lib/liveRefreshStores";
@@ -17,18 +19,20 @@
     const STATUS_FAILED = "Failed";
     const STATUS_RUNNING = "Running";
     const STATUS_QUEUED = "Queued";
+    const STATUS_BLOCKED = "Blocked"; // RFC-006 §11 BLOCK: stored for the record, never queued
 
     let counts = {
         succeeded: 0,
         failed: 0,
         running: 0,
         queued: 0,
+        blocked: 0,
         retrying: 0,
     };
     let lostStuckCount: number
     let failureRate: number | null = null;
 
-    let refreshTimer: ReturnType<typeof setInterval>;
+    let stopRefresh: (() => void) | undefined;
 
     function getTimeRangeParam(): string {
         const now = new Date();
@@ -51,7 +55,15 @@
         return res.page.total ?? 0;
     }
 
+    // Batch 7 (RFC-010 §22): the server counts chains that are waiting on or running a retry RIGHT NOW. An older backend does not send
+    // the number, so the old "runs on a retry" count stands in for it.
     async function countRetrying(): Promise<number> {
+        try {
+            const o = await getOverview();
+            if (typeof o.retrying_chains === "number") return o.retrying_chains;
+        } catch {
+            /* fall through to the older count */
+        }
         const res = await getRuns(`?retry_index=1&limit=1&offset=0${getTimeRangeParam()}`);
         return res.page.total ?? 0;
     }
@@ -69,17 +81,18 @@
     async function loadCounts() {
         isFetching = true;
         try {
-            const [succeeded, failed, running, queued, retrying, runLost, runStuck] = await Promise.all([
+            const [succeeded, failed, running, queued, blocked, retrying, runLost, runStuck] = await Promise.all([
                 countByStatus(STATUS_SUCCEEDED),
                 countByStatus(STATUS_FAILED),
                 countByStatus(STATUS_RUNNING),
                 countByStatus(STATUS_QUEUED),
+                countByStatus(STATUS_BLOCKED),
                 countRetrying(),
                 countOpenAlertsByType("RUN_LOST"),
                 countOpenAlertsByType("RUN_STUCK"),
             ]);
 
-            counts = { succeeded, failed, running, queued, retrying };
+            counts = { succeeded, failed, running, queued, blocked, retrying };
             lostStuckCount = runLost + runStuck;
 
             const total = succeeded + failed;
@@ -96,12 +109,10 @@
 
     onMount(() => {
         loadCounts();
-        refreshTimer = setInterval(() => {
-            if ($autoRefreshEnabled) loadCounts();
-        }, 10000);
+        stopRefresh = startRefresh(loadCounts, { ticks: [runRefreshTick], gaugeEveryMs: 30000 });
     });
 
-    onDestroy(() => clearInterval(refreshTimer));
+    onDestroy(() => stopRefresh?.());
 
     $: if ($timeRange) loadCounts();
 
@@ -134,6 +145,7 @@
             <div class="card"><span>Failed</span><strong>{counts.failed}</strong></div>
             <div class="card"><span>Running</span><strong>{counts.running}</strong></div>
             <div class="card"><span>Waiting / Queued</span><strong>{counts.queued}</strong></div>
+            <div class="card"><span>Blocked by PII policy</span><strong>{counts.blocked}</strong></div>
             <div class="card"><span>Retrying Chains</span><strong>{counts.retrying}</strong></div>
             <div class="card">
                 <span>Failure Rate</span>

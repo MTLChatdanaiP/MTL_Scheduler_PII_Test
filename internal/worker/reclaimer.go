@@ -26,7 +26,11 @@ func StartReclaimer(ctx context.Context, reclaimer_id string) {
 
 	workerStruct := CreateComponent(ctx, reclaimer_id, "Reclaimer")
 	workerInstId := workerStruct.InstanceId
+	defer MarkStopped(workerInstId) // RFC-010 §9
+	markDrainingOnShutdown(ctx, workerInstId)
 	fmt.Println(workerInstId)
+	// a component that never reports a heartbeat shows up as UNKNOWN for ever; the reclaimer used to be one
+	go StartHeartbeat(ctx, reclaimer_id, workerInstId)
 
 	for {
 		select { // RFC-004 §10 Graceful Shutdown: stop starting new reclaim batches once shutdown is signaled
@@ -45,9 +49,14 @@ func StartReclaimer(ctx context.Context, reclaimer_id string) {
 		if err != nil {
 			fmt.Println("xautoclaim error:", err)
 			if cache.IsUnavailable(err) {
-				events.LogEvent(ctx, "system", "redis.unavailable", "reclaimer")
+				events.LogEventEvery(ctx, events.RedisDownEventEvery, "system", "redis.unavailable", "reclaimer")
 			}
-			time.Sleep(reclaimInterval)
+			if cache.IsNoGroup(err) {
+				_ = ensureGroup(ctx, rdb, cache.TaskStream, WorkerGroupA) // the same self-healing as ReadStream
+			}
+			if !sleepCtx(ctx, reclaimInterval) {
+				return
+			}
 			continue
 		}
 
@@ -57,11 +66,14 @@ func StartReclaimer(ctx context.Context, reclaimer_id string) {
 				return
 			default:
 			}
-			JobId, ok := msg.Values["job_id"].(string)
-			if !ok {
-				fmt.Println("Error parsing string (RECLAIMER EVENT):", ok)
+			// RFC-003 §5: read through the envelope parser. A message with no usable job_id carries no
+			// work, so it is dropped (acked and deleted) instead of being re-claimed forever.
+			env, parseErr := cache.ParseEnvelope(msg.Values)
+			if parseErr != nil {
+				dropMalformed(ctx, reclaimer_id, cache.TaskStream, WorkerGroupA, msg, parseErr)
 				continue
 			}
+			JobId := env.JobID
 			// RFC-001 §6 / RFC-004 §14: only take the task over when the worker that owns its unfinished attempt
 			// is really gone. If it still looks alive, leave the message pending (do NOT acknowledge it): the
 			// worker will acknowledge it when it finishes, or a later pass will find it gone and recover it.
@@ -78,6 +90,8 @@ func StartReclaimer(ctx context.Context, reclaimer_id string) {
 			slog.Info("task reclaimed", "reclaimer_id", reclaimer_id, "job_id", JobId)
 		}
 
-		time.Sleep(reclaimInterval)
+		if !sleepCtx(ctx, reclaimInterval) {
+			return
+		}
 	}
 }

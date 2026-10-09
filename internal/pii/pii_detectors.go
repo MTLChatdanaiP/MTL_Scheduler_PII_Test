@@ -68,7 +68,7 @@ func Detect(text string, detectors []models.DetectorDefinition) ([]Finding, []st
 
 // TODO: internal/pii/json_scan.go (or add to the existing pii_controller.go)
 
-func DetectJSON(jsonText string, detectors []models.DetectorDefinition, policy models.PIIPolicy, source string, jobType string) ([]EvaluatedFinding, []string, bool) {
+func DetectJSON(jsonText string, detectors []models.DetectorDefinition, policy models.PIIPolicy, source string, jobType string, queue string) ([]EvaluatedFinding, []string, bool) {
 	var parsed interface{}
 	if err := json.Unmarshal([]byte(jsonText), &parsed); err != nil {
 		return nil, nil, false
@@ -86,6 +86,7 @@ func DetectJSON(jsonText string, detectors []models.DetectorDefinition, policy m
 			ctx := MatchContext{
 				Source:     source,
 				JobType:    jobType,
+				Queue:      queue,
 				PIIType:    string(f.Type),
 				DetectorID: f.DetectorID,
 				FieldPath:  path,
@@ -96,6 +97,5 @@ func DetectJSON(jsonText string, detectors []models.DetectorDefinition, policy m
 		}
 	})
 
-	println()
 	return evaluated, failedDetectors, true
 }

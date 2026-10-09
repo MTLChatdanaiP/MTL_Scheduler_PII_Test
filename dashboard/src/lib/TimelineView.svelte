@@ -2,6 +2,7 @@
     import { onMount } from "svelte";
     import { getChainTimeline, type TimelineEntry } from "./api";
     import JsonTree from "./JsonTree.svelte";
+    import { visibleSlice, FIRST_STEP, NEXT_STEP } from "./progressive";
 
     export let chainId: string;
     export let onClose: () => void;
@@ -28,6 +29,8 @@
     }
 
     $: visibleEntries = hideNoisyEvents ? entries.filter(e => !isNoisy(e)) : entries;
+    let shown = FIRST_STEP;
+    $: slice = visibleSlice(visibleEntries, shown);
     $: hiddenCount = entries.length - visibleEntries.length;
 
     onMount(async () => {
@@ -94,7 +97,7 @@
             {/if}
 
             <div class="timeline-list">
-                {#each visibleEntries as entry, i (i)}
+                {#each slice.items as entry, i (i)}
                     <div class="timeline-entry">
                         <div class="entry-time">{new Date(entry.occurred_at).toLocaleString()}</div>
                         <div class="entry-source badge" class:event={entry.source === "EVENT"} class:attempt={entry.source === "ATTEMPT"} class:pii={entry.source === "PII"} class:alert={entry.source === "ALERT"} class:annotation={entry.source === "ANNOTATION"}>
@@ -109,6 +112,9 @@
                             {#if entry.detail?.attempt_number}
                                 <span class="entry-attempt">· attempt {entry.detail.attempt_number}</span>
                             {/if}
+                            {#if entry.detail?.stream_position}
+                                <span class="entry-stream" title="The Redis stream message this event belongs to: the publish and the claim of one delivery share it">· stream {entry.detail.stream_position}</span>
+                            {/if}
                         </div>
                         {#if entry.detail}
                             <div class="entry-detail">
@@ -117,6 +123,10 @@
                         {/if}
                     </div>
                 {/each}
+
+                {#if slice.remaining > 0}
+                    <button class="show-more" on:click={() => (shown += NEXT_STEP)}>Show {Math.min(NEXT_STEP, slice.remaining)} more ({slice.remaining} not drawn yet)</button>
+                {/if}
 
                 {#if visibleEntries.length === 0}
                     <p class="status">No events to show.</p>
@@ -194,5 +204,6 @@
 
     .hidden-count { color: #999; margin-left: 4px; }
     .gap-note { color: #999; font-size: 11px; margin-left: 16px; }
-    .entry-worker, .entry-attempt { font-weight: normal; color: #888; font-size: 11px; }
+    .entry-worker, .entry-attempt, .entry-stream { font-weight: normal; color: #888; font-size: 11px; }
+    .entry-stream { font-family: monospace; }
 </style>

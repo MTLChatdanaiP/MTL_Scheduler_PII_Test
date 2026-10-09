@@ -1,4 +1,6 @@
 <script lang="ts">
+    import { startRefresh } from "./refresh";
+    import { piiRefreshTick } from "./liveRefreshStores";
     import { onMount, onDestroy } from "svelte";
     import { autoRefreshEnabled } from "./stores";
     import { getPIIFindings, getRuns } from "./api";
@@ -10,7 +12,7 @@
     let byRule: Record<string, number> = {};
     let scanFailureCount = 0;
     let error: unknown = null;
-    let refreshTimer: ReturnType<typeof setInterval>;
+    let stopRefresh: (() => void) | undefined;
     let hasLoadedOnce = false;
     let isFetching = false;
     let runsWithFindingsCount = 0;
@@ -47,12 +49,10 @@
 
     onMount(() => {
         loadCards();
-        refreshTimer = setInterval(() => {
-            if ($autoRefreshEnabled) loadCards();
-        }, 10000);
+        stopRefresh = startRefresh(loadCards, { ticks: [piiRefreshTick], gaugeEveryMs: 30000 });
     });
 
-    onDestroy(() => clearInterval(refreshTimer));
+    onDestroy(() => stopRefresh?.());
 
     $: state = deriveState({ hasLoadedOnce, isFetching, error, isEmpty: false });
 </script>

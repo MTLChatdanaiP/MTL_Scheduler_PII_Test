@@ -13,6 +13,7 @@ import (
 	"MTL_Scheduler_PII_Test/internal/freshness"
 	"MTL_Scheduler_PII_Test/internal/models"
 	"MTL_Scheduler_PII_Test/internal/pagination"
+	"MTL_Scheduler_PII_Test/internal/pii"
 	"MTL_Scheduler_PII_Test/internal/taskservice"
 )
 
@@ -37,6 +38,17 @@ func CreateTask(c *gin.Context) { // RFC-001 §9 Commands: CreateInitialRun
 	}
 
 	result_reply := taskservice.CreateTask_Direct(ctx, task)
+
+	// RFC-006 §11 BLOCK: the task was stored for the record but will never run, which is not a success
+	if result_reply.Status == "Blocked" {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"error":  "task blocked by PII policy",
+			"job_id": result_reply.JobId,
+			"status": "Blocked",
+		})
+		return
+	}
+
 	c.JSON(http.StatusCreated, result_reply)
 }
 
@@ -261,6 +273,7 @@ func GetTask(c *gin.Context) {
 			item.PIIFindingCount = projection.PIIFindingCount
 			item.WasReclaimed = projection.WasReclaimed
 			item.LastEventAt = projection.LastEventAt
+			item.RunProjectionExtras = projectionExtras(projection)
 		}
 
 		if attempts, ok := attemptMap[task.JobId]; ok {
@@ -297,6 +310,7 @@ func GetTask(c *gin.Context) {
 			item.Annotations = runAnnotations
 		}
 
+		item.setRFCState()
 		runs = append(runs, item)
 	}
 
@@ -421,6 +435,7 @@ func GetTaskDetail(c *gin.Context) {
 	item.PIIFindingCount = projection.PIIFindingCount
 	item.WasReclaimed = projection.WasReclaimed
 	item.LastEventAt = projection.LastEventAt
+	item.RunProjectionExtras = projectionExtras(projection)
 
 	item.Attempts = attempts
 	item.AttemptCount = len(attempts)
@@ -462,6 +477,8 @@ func GetTaskDetail(c *gin.Context) {
 		fmt.Println("failed to compute watermark:", err)
 	}
 
+	item.setRFCState()
+
 	c.JSON(http.StatusOK, RunDetailResponse{
 		Run:              item,
 		Freshness:        freshnessInfo,
@@ -498,6 +515,15 @@ func ToggleSchedule(c *gin.Context) {
 	def.Enabled = req.Enabled
 	database.DB.WithContext(ctx).Save(&def)
 
+	// who changed what runs: the schedule events carry no actor, so it is recorded here
+	auditAction := "SCHEDULE_DISABLED"
+	if def.Enabled {
+		auditAction = "SCHEDULE_ENABLED"
+	}
+	if err := pii.RecordAccess(ctx, c.GetString("actor"), auditAction, "SCHEDULE", def.ScheduleId, 1); err != nil {
+		fmt.Println("FAILED TO WRITE AUDIT RECORD for", auditAction, def.ScheduleId)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"schedule_id": def.ScheduleId,
 		"enabled":     def.Enabled,
@@ -512,6 +538,11 @@ func RerunTaskPost(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+
+	// who created a task by re-running one
+	if err := pii.RecordAccess(ctx, c.GetString("actor"), "RUN_RERUN", "RUN", jobId, 1); err != nil {
+		fmt.Println("FAILED TO WRITE AUDIT RECORD for RUN_RERUN", jobId)
 	}
 
 	c.JSON(http.StatusCreated, result_reply)

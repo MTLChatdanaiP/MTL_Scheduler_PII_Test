@@ -14,8 +14,9 @@ services:
   redis:
     image: redis:7
     container_name: pii-test-redis
+    command: ["redis-server", "--requirepass", "dev-redis-password-change-me"]
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - pii-test-redisdata:/data
 

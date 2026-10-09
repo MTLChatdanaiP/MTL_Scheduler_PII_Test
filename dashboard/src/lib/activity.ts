@@ -1,11 +1,41 @@
 import type { LiveEvent, LiveState } from "./liveClient";
 
-export type Category = "task" | "alert" | "pii" | "other";
-export const CATEGORIES: Category[] = ["task", "alert", "pii", "other"];
+// RFC-005 §5 / RFC-010 §7: Batches 3 and 4 added real attempt.* and schedule.* events, and the feed used to file every
+// family except task/alert/pii under "other", so those new events and every queue/worker/component event all landed in
+// one undifferentiated bucket. The set is driven by this ONE list: the feed, the graph, the counters and the URL all
+// derive from it, so a category added here cannot be forgotten somewhere else.
+export type Category = "task" | "attempt" | "schedule" | "alert" | "pii" | "system" | "other";
+export const CATEGORIES: Category[] = ["task", "attempt", "schedule", "alert", "pii", "system", "other"];
+
+// the platform's own plumbing, as opposed to the work it is doing
+const SYSTEM_FAMILIES = ["queue", "worker", "component", "monitoring", "redis", "delivery", "retention"];
 
 export function categoryOf(type: string): Category {
-    const c = type.split(".")[0];
-    return c === "task" || c === "alert" || c === "pii" ? c : "other";
+    const family = type.split(".")[0];
+    // run.* (run.lost, ...) describes a run, the same thing task.* does
+    if (family === "task" || family === "run") return "task";
+    if (family === "attempt" || family === "schedule" || family === "alert" || family === "pii") return family;
+    if (SYSTEM_FAMILIES.includes(family)) return "system";
+    return "other";
+}
+
+export function emptyCounts(): Record<Category, number> {
+    return Object.fromEntries(CATEGORIES.map((c) => [c, 0])) as Record<Category, number>;
+}
+
+export function allVisible(): Record<Category, boolean> {
+    return Object.fromEntries(CATEGORIES.map((c) => [c, true])) as Record<Category, boolean>;
+}
+
+// The URL records which categories are HIDDEN, not which are shown: an absent param means "everything visible", and a
+// category added to CATEGORIES later is automatically visible on an old shared link instead of silently hidden.
+export function showFromHidden(hiddenParam: string | null | undefined): Record<Category, boolean> {
+    const hidden = new Set((hiddenParam ?? "").split(",").filter(Boolean));
+    return Object.fromEntries(CATEGORIES.map((c) => [c, !hidden.has(c)])) as Record<Category, boolean>;
+}
+
+export function hiddenFromShow(show: Record<Category, boolean>): string {
+    return CATEGORIES.filter((c) => !show[c]).join(",");
 }
 
 // Pure so it can be unit-tested. `show` says which categories are visible;
@@ -23,7 +53,7 @@ export function filterEvents(
 }
 
 export function countByCategory(events: LiveEvent[]): Record<Category, number> {
-    const counts: Record<Category, number> = { task: 0, alert: 0, pii: 0, other: 0 };
+    const counts = emptyCounts();
     for (const e of events) counts[categoryOf(e.type)]++;
     return counts;
 }
@@ -52,7 +82,7 @@ export function bucketEvents(
     for (let i = 0; i < bucketCount; i++) {
         buckets.push({
             start: firstStart + i * bucketMs,
-            counts: { task: 0, alert: 0, pii: 0, other: 0 },
+            counts: emptyCounts(),
             total: 0,
         });
     }

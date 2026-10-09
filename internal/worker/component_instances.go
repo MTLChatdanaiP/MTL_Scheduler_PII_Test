@@ -19,8 +19,8 @@ func GetComponentInstances(ctx context.Context) ([]models.ComponentInstance, err
 		return nil, err
 	}
 
-	var heartbeats []models.WorkerHeartbeat
-	if err := database.DB.WithContext(ctx).Order("occurred_at DESC").Find(&heartbeats).Error; err != nil {
+	heartbeats, err := newestHeartbeatPerInstance(ctx)
+	if err != nil {
 		return nil, err
 	}
 
@@ -47,12 +47,23 @@ func GetComponentInstances(ctx context.Context) ([]models.ComponentInstance, err
 			componentType = "Worker"
 		}
 
+		var stoppedAt, drainingAt time.Time
+		if w.StoppedAt != nil {
+			stoppedAt = *w.StoppedAt
+		}
+		if w.DrainingAt != nil {
+			drainingAt = *w.DrainingAt
+		}
+
 		out = append(out, models.ComponentInstance{
 			ComponentType: componentType,
 			InstanceID:    w.InstanceId,
 			DisplayName:   w.WorkerId,
 			StartedAt:     w.StartedAt,
 			LastSeenAt:    newest[w.InstanceId],
+			BuildRevision: w.BuildRevision,
+			StoppedAt:     stoppedAt,
+			DrainingAt:    drainingAt,
 		})
 	}
 
@@ -75,6 +86,10 @@ func checkComponentInstanceTransitions(ctx context.Context) error {
 	now := time.Now().UTC()
 	for _, inst := range instances {
 		verdict := models.InstanceVerdict(inst, now, workerDegradedAfter, workerOfflineAfter)
+		// Draining reads HEALTHY, but it is a state change worth announcing, so it is tracked as its own state.
+		if inst.Draining(now) {
+			verdict = "DRAINING"
+		}
 
 		instanceStatusMu.Lock()
 		old, previouslySeen := lastInstanceStatus[inst.InstanceID]
@@ -85,11 +100,23 @@ func checkComponentInstanceTransitions(ctx context.Context) error {
 		// a transition -- publishing then would fire a burst for every
 		// instance on every backend restart.
 		if previouslySeen && old != verdict {
-			events.LogEvent(ctx, inst.InstanceID, "component."+lowerVerdict(verdict), "monitoring-sweep")
+			events.LogEvent(ctx, inst.InstanceID, componentTransitionEvent(inst, verdict), "monitoring-sweep")
 		}
 	}
 
 	return nil
+}
+
+// componentTransitionEvent names the event for an instance whose verdict just changed. A deliberate stop is "component.stopped"
+// (an ordinary state change); only an unexplained OFFLINE is "component.offline", which is critical and pages someone (RFC-010 §9, §20).
+func componentTransitionEvent(inst models.ComponentInstance, verdict string) string {
+	if verdict == "OFFLINE" && inst.GracefullyStopped() {
+		return "component.stopped"
+	}
+	if verdict == "DRAINING" {
+		return "component.draining"
+	}
+	return "component." + lowerVerdict(verdict)
 }
 
 // lowerVerdict takes a verdict constant and returns the lowercase suffix used

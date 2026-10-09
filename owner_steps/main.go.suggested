@@ -1,0 +1,135 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/joho/godotenv"
+
+	alerts "MTL_Scheduler_PII_Test/internal/alerting"
+	"MTL_Scheduler_PII_Test/internal/auth"
+	"MTL_Scheduler_PII_Test/internal/bootstrap"
+	redisdb "MTL_Scheduler_PII_Test/internal/cache"
+	"MTL_Scheduler_PII_Test/internal/database"
+	"MTL_Scheduler_PII_Test/internal/models"
+	pii "MTL_Scheduler_PII_Test/internal/pii"
+	"MTL_Scheduler_PII_Test/internal/routes"
+	"MTL_Scheduler_PII_Test/internal/shutdown"
+	"MTL_Scheduler_PII_Test/internal/worker"
+)
+
+func main() {
+	godotenv.Load()
+
+	// Batch 5 (S3): refuse to start with a weak PII key or missing database settings, BEFORE anything is connected or served.
+	// The error names the setting, never its value.
+	if err := bootstrap.StartupChecks(); err != nil {
+		log.Fatal(err)
+	}
+
+	database.ConnectDatabase()
+	redisdb.ConnectRedis()
+
+	if _, err := pii.ActivatePolicy(context.Background(), "policies/default.json", "STARTUP", "system"); err != nil {
+		log.Fatal("Broken Policy, Stopping App", err)
+	}
+
+	if _, err := alerts.ActivateRules(context.Background(), "internal/alerting/rules.json", "system"); err != nil {
+		log.Fatal("Broken Alerts Rules, Stopping App", err)
+	}
+
+	if err := auth.LoadPrincipals("internal/auth/config.json"); err != nil {
+		log.Fatal(err)
+	}
+
+	database.DB.AutoMigrate(
+		&models.Task{}, &models.PIIRecord{},
+		&models.EventEnvelope{}, &models.RunProjection{},
+		&models.Worker{}, &models.WorkerHeartbeat{}, &models.QueueHealth{},
+		&models.Attempt{}, &models.ExecutionChain{}, &models.ScheduleDefinition{},
+		&models.MonitoringAnnotation{}, &models.MonitoringHealth{}, &models.PIIVault{}, &models.PolicyActivation{},
+		&models.Alert{}, &models.Notification{},
+		// added by Batches 1-4: without these their tables are never created
+		&models.ExecutionArtifact{}, &models.AuditRecord{}, &models.ScheduleSnapshot{},
+		&models.ScheduleOccurrence{}, &models.ScheduleProjection{},
+	)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	r := routes.SetupRouter(ctx)
+
+	srv := &http.Server{
+		Addr:    ":8080",
+		Handler: r,
+	}
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("server error: %v", err)
+		}
+	}()
+
+	if url := os.Getenv("ALERT_WEBHOOK_URL"); url != "" {
+		adapter := alerts.NewWebhookAdapter(url)
+		alerts.NotificationAdapters[adapter.Channel()] = adapter
+	}
+
+	var wg sync.WaitGroup
+
+	wg.Add(7)
+
+	go func() { defer wg.Done(); worker.SetupWorker(ctx, "Consumer-a") }()
+	go func() { defer wg.Done(); worker.StartReclaimer(ctx, "Consumer_Backup") }()
+	go func() { defer wg.Done(); worker.StartScheduler(ctx, "Schedule_Buddy") }()
+	go func() { defer wg.Done(); worker.StartQueueHealth(ctx) }()
+	go func() { defer wg.Done(); worker.StartMonitoringSweep(ctx) }()
+	go func() { defer wg.Done(); alerts.StartAlertsSweep(ctx) }()
+	// Batch 5 (M3): StartRetentionSweep existed but nothing started it, so retention never ran
+	go func() { defer wg.Done(); worker.StartRetentionSweep(ctx) }()
+
+	fmt.Println("Running... press Ctrl+C to stop")
+	<-ctx.Done()
+
+	shutdown.Run(context.Background(), []shutdown.Phase{
+		{
+			Name:    "http-server",
+			Timeout: 10 * time.Second,
+			Run: func(ctx context.Context) error {
+				// RFC-004 §10 Graceful Shutdown: stop accepting new HTTP
+				// requests first, so no new tasks enter the system while
+				// the rest of shutdown proceeds.
+				return srv.Shutdown(ctx)
+			},
+		},
+		{
+			Name:    "background-workers",
+			Timeout: 40 * time.Second, // comfortably longer than ProcessTask's 30s sleep
+			Run: func(ctx context.Context) error {
+				// Worker/reclaimer/scheduler were already told to stop via
+				// the earlier ctx.Done() — this phase just waits (bounded)
+				// for them to actually finish any in-flight work.
+				return shutdown.WaitGroup(ctx, &wg)
+			},
+		},
+		{
+			Name:    "infra-connections",
+			Timeout: 5 * time.Second,
+			Run: func(ctx context.Context) error {
+				if sqlDB, err := database.DB.DB(); err == nil {
+					sqlDB.Close()
+				}
+				return redisdb.Client.Close()
+			},
+		},
+	})
+
+	fmt.Println("Shutdown complete, exiting")
+}

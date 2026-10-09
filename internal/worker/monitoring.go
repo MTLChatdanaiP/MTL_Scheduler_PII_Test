@@ -21,8 +21,8 @@ const (
 	monitoringInterval             = 20 * time.Second
 	workerHeartbeatFreshnessWindow = 30 * time.Second
 	missedOccurrenceThreshold      = 5 * time.Minute
-	workerDegradedAfter            = 60 * time.Second
-	workerOfflineAfter             = 300 * time.Second
+	workerDegradedAfter            = models.HeartbeatDegradedAfter
+	workerOfflineAfter             = models.HeartbeatOfflineAfter
 )
 
 var (
@@ -31,11 +31,15 @@ var (
 )
 
 func checkWorkerStatusTransitions(ctx context.Context) error {
-	var heartbeats []models.WorkerHeartbeat
-	if err := database.DB.WithContext(ctx).Order("occurred_at DESC").Find(&heartbeats).Error; err != nil {
+	heartbeats, err := newestHeartbeatPerWorker(ctx)
+	if err != nil {
 		fmt.Println("Failed to query worker heartbeats for status check:", err)
 		return err
 	}
+
+	// RFC-010 §9: a worker that shut down on purpose is "stopped", not "offline" -- the latter is critical and pages someone.
+	stopped := stoppedInstances(ctx)
+	draining := drainingInstances(ctx) // RFC-010 §9: finishing its last task, no longer heartbeating on purpose
 
 	seenWorker := make(map[string]bool)
 
@@ -46,6 +50,12 @@ func checkWorkerStatusTransitions(ctx context.Context) error {
 		seenWorker[hb.WorkerId] = true
 
 		newStatus := workerStatusFor(time.Since(hb.OccurredAt))
+		if draining[hb.InstanceId] {
+			newStatus = "draining"
+		}
+		if stopped[hb.InstanceId] {
+			newStatus = "stopped"
+		}
 
 		workerStatusMu.Lock()
 		oldStatus, seen := lastWorkerStatus[hb.WorkerId]
@@ -128,6 +138,12 @@ func StartMonitoringSweep(ctx context.Context) {
 		resolveDuplicateExecutionAnnotations(ctx)
 		resolveScheduleDriftAnnotations(ctx)
 
+		// RFC-005 §7: bring every run projection's annotation and alert counts into line with the tables they come from
+		events.RefreshRunProjectionCounts(ctx)
+
+		// RFC-006 §32: is the policy file on disk still the policy that is active?
+		checkPolicyDrift(ctx)
+
 		time.Sleep(monitoringInterval)
 	}
 }
@@ -145,12 +161,8 @@ func checkStuckTasks(ctx context.Context) error {
 	}
 
 	for _, task := range tasks {
-		var latestEvent models.EventEnvelope
-
-		err := database.DB.WithContext(ctx).
-			Where("job_id = ?", task.JobId).
-			Order("occurred_at DESC").
-			First(&latestEvent).Error
+		// RFC-005 §8: the newest PROGRESS event; the 10-second attempt.heartbeat does not count (see newestProgressEvent)
+		latestEvent, err := newestProgressEvent(ctx, task.JobId)
 
 		if err != nil {
 			fmt.Println("Failed to query latest event for task:", task.JobId, err)
@@ -181,7 +193,7 @@ func checkStuckTasks(ctx context.Context) error {
 			continue
 		}
 
-		taskIsStale := time.Since(latestEvent.OccurredAt) > stuckThreshold
+		taskIsStale := time.Since(latestEvent.OccurredAt) > runSilentAfter()
 		workerIsHealthy := time.Since(latest_heartbeat.OccurredAt) < 5*time.Minute
 
 		if taskIsStale && workerIsHealthy {
@@ -193,7 +205,7 @@ func checkStuckTasks(ctx context.Context) error {
 			if notFoundErr != nil {
 				evidenceMap := map[string]interface{}{
 					"last_event_at":     latestEvent.OccurredAt,
-					"threshold_seconds": int(stuckThreshold.Seconds()),
+					"threshold_seconds": int(runSilentAfter().Seconds()),
 				}
 
 				evidenceJSON, _ := json.Marshal(evidenceMap)
@@ -231,12 +243,8 @@ func checkLostTasks(ctx context.Context) error {
 	}
 
 	for _, task := range tasks {
-		var latestEvent models.EventEnvelope
-
-		err := database.DB.WithContext(ctx).
-			Where("job_id = ?", task.JobId).
-			Order("occurred_at DESC").
-			First(&latestEvent).Error
+		// RFC-005 §8: the newest PROGRESS event; the 10-second attempt.heartbeat does not count (see newestProgressEvent)
+		latestEvent, err := newestProgressEvent(ctx, task.JobId)
 
 		if err != nil {
 			fmt.Println("Failed to query latest event for task:", task.JobId, err)
@@ -266,7 +274,7 @@ func checkLostTasks(ctx context.Context) error {
 			fmt.Println("Failed to query latest heartbeat for worker:", latest_attempt.WorkerId, err)
 		}
 
-		taskIsStale := time.Since(latestEvent.OccurredAt) > stuckThreshold
+		taskIsStale := time.Since(latestEvent.OccurredAt) > runSilentAfter()
 		workerIsUnhealthy := errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && time.Since(latest_heartbeat.OccurredAt) > workerHeartbeatFreshnessWindow)
 
 		if taskIsStale && workerIsUnhealthy {
@@ -278,7 +286,7 @@ func checkLostTasks(ctx context.Context) error {
 			if notFoundErr != nil {
 				evidenceMap := map[string]interface{}{
 					"last_event_at":     latestEvent.OccurredAt,
-					"threshold_seconds": int(stuckThreshold.Seconds()),
+					"threshold_seconds": int(runSilentAfter().Seconds()),
 				}
 
 				evidenceJSON, _ := json.Marshal(evidenceMap)
@@ -336,12 +344,7 @@ func resolveClearedAnnotations(ctx context.Context, annotationType string) {
 			continue
 		}
 
-		var latestEvent models.EventEnvelope
-
-		err = database.DB.WithContext(ctx).
-			Where("job_id = ?", annotation.SubjectID).
-			Order("occurred_at DESC").
-			First(&latestEvent).Error
+		latestEvent, err := newestProgressEvent(ctx, annotation.SubjectID)
 
 		if err != nil {
 			fmt.Println("Failed to query latest event for task:", annotation.SubjectID, err)
@@ -349,7 +352,7 @@ func resolveClearedAnnotations(ctx context.Context, annotationType string) {
 		}
 
 		isTerminal := task.Status == "Completed" || task.Status == "Failed"
-		isFreshAgain := time.Since(latestEvent.OccurredAt) < stuckThreshold
+		isFreshAgain := time.Since(latestEvent.OccurredAt) < runSilentAfter()
 
 		if isTerminal || isFreshAgain {
 			now := time.Now().UTC()

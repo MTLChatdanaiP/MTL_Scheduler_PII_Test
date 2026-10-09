@@ -29,9 +29,15 @@ func ruleMatches(rule models.PolicyRule, ctx MatchContext) bool {
 		return false
 	}
 
-	//if len(match.PIITypes) > 0 && !slices.Contains(match.PIITypes, ctx.PIIType) {
-	//	return false
-	//}
+	// RFC-006 §9: "queues" is a real match dimension the model always had a
+	// field for, but nothing ever checked it or populated ctx.Queue.
+	if len(match.Queues) > 0 && !slices.Contains(match.Queues, ctx.Queue) {
+		return false
+	}
+
+	if len(match.PIITypes) > 0 && !slices.Contains(match.PIITypes, ctx.PIIType) {
+		return false
+	}
 
 	if len(match.DetectorIDs) > 0 && !slices.Contains(match.DetectorIDs, ctx.DetectorID) {
 		return false
@@ -56,13 +62,13 @@ func ruleMatches(rule models.PolicyRule, ctx MatchContext) bool {
 		}
 	}
 
-	//if len(match.Labels) > 0 {
-	//	for _, requiredLabel := range match.Labels {
-	//		if !slices.Contains(ctx.Labels, requiredLabel) {
-	//			return false
-	//		}
-	//	}
-	//}
+	if len(match.Labels) > 0 {
+		for _, requiredLabel := range match.Labels {
+			if !slices.Contains(ctx.Labels, requiredLabel) {
+				return false
+			}
+		}
+	}
 
 	return true
 }
@@ -76,14 +82,9 @@ func ResolveRule(ctx MatchContext, policy models.PIIPolicy) models.PolicyRule {
 	})
 
 	for _, rule := range rules {
-		DetectorIDs := rule.Match.DetectorIDs
-		if !slices.Contains(DetectorIDs, ctx.DetectorID) {
-			continue
+		if ruleMatches(rule, ctx) {
+			return rule
 		}
-		if !ruleMatches(rule, ctx) {
-			continue
-		}
-		return rule
 	}
 
 	return models.PolicyRule{
@@ -92,25 +93,4 @@ func ResolveRule(ctx MatchContext, policy models.PIIPolicy) models.PolicyRule {
 			Type: policy.Spec.Defaults.Action,
 		},
 	}
-}
-
-func ResolveAction(detectorID string, policy models.PIIPolicy) string {
-
-	rules := make([]models.PolicyRule, len(policy.Spec.Rules))
-	copy(rules, policy.Spec.Rules)
-
-	sort.Slice(rules, func(i, j int) bool {
-		return rules[i].Priority > rules[j].Priority
-	})
-
-	for _, rule := range rules {
-		DetectorIDs := rule.Match.DetectorIDs
-		for _, id := range DetectorIDs {
-			if id == detectorID {
-				return rule.Action.Type
-			}
-		}
-	}
-
-	return policy.Spec.Defaults.Action
 }

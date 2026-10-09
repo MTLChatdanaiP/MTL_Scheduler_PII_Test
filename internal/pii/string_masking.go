@@ -135,50 +135,56 @@ func countBeforeAt(s string, at string, preserveFormat bool) int {
 	return count
 }
 
+// PrefixBeforeAt masks an email-shaped value, keeping the first `visible`
+// characters of the part before the "@" and masking the rest of it. The domain is
+// preserved unless domainMode is "MASK". Name and signature are unchanged.
+//
+// It used to keep the LAST `visible` characters of the local part instead of the
+// first (so "jane.doe" with 2 visible became "******oe" rather than "ja******"),
+// contradicting RFC-006 §13's localVisiblePrefix, and it panicked on an empty
+// mask character. A value with no "@" is treated as all local part, so it is still
+// masked rather than passed through.
 func PrefixBeforeAt(s string, visible int, replacement string, preserveFormat bool, domainMode string) string {
-	n := countBeforeAt(s, "@", preserveFormat) - visible
-
-	if n < 0 {
-		n = 0
+	if replacement == "" {
+		replacement = defaultMaskCharacter
 	}
+	if visible < 0 {
+		visible = 0
+	}
+	fill := []rune(replacement)[0]
 
 	runes := []rune(s)
-	count := 0
 
+	at := -1
 	for i, r := range runes {
 		if r == '@' {
+			at = i
 			break
 		}
+	}
+	local := len(runes)
+	if at != -1 {
+		local = at
+	}
 
-		if count >= n {
+	kept := 0
+	for i := 0; i < local; i++ {
+		if preserveFormat && !isAlphanumeric(runes[i]) {
 			continue
 		}
-
-		if preserveFormat && !isAlphanumeric(r) {
+		if kept < visible {
+			kept++
 			continue
 		}
-
-		runes[i] = []rune(replacement)[0]
-		count++
+		runes[i] = fill
 	}
 
 	result := string(runes)
 
-	if domainMode == "MASK" {
-		atIndex := strings.Index(result, "@")
-
-		if atIndex != -1 {
-			domain := result[atIndex+1:]
-
-			domain = suffixReplacer(
-				domain,
-				0,
-				replacement,
-				preserveFormat,
-			)
-
-			result = result[:atIndex+1] + domain
-		}
+	if strings.ToUpper(domainMode) == "MASK" && at != -1 {
+		domain := string(runes[at+1:])
+		domain = suffixReplacer(domain, 0, replacement, preserveFormat)
+		result = string(runes[:at+1]) + domain
 	}
 
 	return result

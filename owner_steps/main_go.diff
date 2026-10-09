@@ -1,0 +1,68 @@
+--- main.go (as uploaded)
++++ main.go (suggested)
+@@ -15,6 +15,7 @@
+ 
+ 	alerts "MTL_Scheduler_PII_Test/internal/alerting"
+ 	"MTL_Scheduler_PII_Test/internal/auth"
++	"MTL_Scheduler_PII_Test/internal/bootstrap"
+ 	redisdb "MTL_Scheduler_PII_Test/internal/cache"
+ 	"MTL_Scheduler_PII_Test/internal/database"
+ 	"MTL_Scheduler_PII_Test/internal/models"
+@@ -27,6 +28,12 @@
+ func main() {
+ 	godotenv.Load()
+ 
++	// Batch 5 (S3): refuse to start with a weak PII key or missing database settings, BEFORE anything is connected or served.
++	// The error names the setting, never its value.
++	if err := bootstrap.StartupChecks(); err != nil {
++		log.Fatal(err)
++	}
++
+ 	database.ConnectDatabase()
+ 	redisdb.ConnectRedis()
+ 
+@@ -49,9 +56,15 @@
+ 		&models.Attempt{}, &models.ExecutionChain{}, &models.ScheduleDefinition{},
+ 		&models.MonitoringAnnotation{}, &models.MonitoringHealth{}, &models.PIIVault{}, &models.PolicyActivation{},
+ 		&models.Alert{}, &models.Notification{},
++		// added by Batches 1-4: without these their tables are never created
++		&models.ExecutionArtifact{}, &models.AuditRecord{}, &models.ScheduleSnapshot{},
++		&models.ScheduleOccurrence{}, &models.ScheduleProjection{},
+ 	)
+ 
+-	r := routes.SetupRouter()
++	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
++	defer stop()
++
++	r := routes.SetupRouter(ctx)
+ 
+ 	srv := &http.Server{
+ 		Addr:    ":8080",
+@@ -64,9 +77,6 @@
+ 		}
+ 	}()
+ 
+-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+-	defer stop()
+-
+ 	if url := os.Getenv("ALERT_WEBHOOK_URL"); url != "" {
+ 		adapter := alerts.NewWebhookAdapter(url)
+ 		alerts.NotificationAdapters[adapter.Channel()] = adapter
+@@ -74,7 +84,7 @@
+ 
+ 	var wg sync.WaitGroup
+ 
+-	wg.Add(6)
++	wg.Add(7)
+ 
+ 	go func() { defer wg.Done(); worker.SetupWorker(ctx, "Consumer-a") }()
+ 	go func() { defer wg.Done(); worker.StartReclaimer(ctx, "Consumer_Backup") }()
+@@ -82,6 +92,8 @@
+ 	go func() { defer wg.Done(); worker.StartQueueHealth(ctx) }()
+ 	go func() { defer wg.Done(); worker.StartMonitoringSweep(ctx) }()
+ 	go func() { defer wg.Done(); alerts.StartAlertsSweep(ctx) }()
++	// Batch 5 (M3): StartRetentionSweep existed but nothing started it, so retention never ran
++	go func() { defer wg.Done(); worker.StartRetentionSweep(ctx) }()
+ 
+ 	fmt.Println("Running... press Ctrl+C to stop")
+ 	<-ctx.Done()

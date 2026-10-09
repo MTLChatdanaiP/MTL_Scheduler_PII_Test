@@ -1,4 +1,6 @@
 <script lang="ts">
+    import { startRefresh } from "./refresh";
+    import { monitoringRefreshTick } from "./liveRefreshStores";
     import { onMount, onDestroy } from "svelte";
     import { autoRefreshEnabled } from "../lib/stores";
     import { getMonitoringHealth, type MonitoringHealthResponse } from "../lib/api";
@@ -35,7 +37,7 @@
 
     let stats: LivePipelineStats | null = null;
     let error: unknown = null;
-    let refreshTimer: ReturnType<typeof setInterval>;
+    let stopRefresh: (() => void) | undefined;
     let hasLoadedOnce = false;
     let isFetching = false;
 
@@ -57,12 +59,10 @@
 
     onMount(() => {
         load();
-        refreshTimer = setInterval(() => {
-            if ($autoRefreshEnabled) load();
-        }, 10000);
+        stopRefresh = startRefresh(load, { ticks: [monitoringRefreshTick], gaugeEveryMs: 10000 });
     });
 
-    onDestroy(() => clearInterval(refreshTimer));
+    onDestroy(() => stopRefresh?.());
 
     $: state = deriveState({ hasLoadedOnce, isFetching, error, isEmpty: stats === null });
 

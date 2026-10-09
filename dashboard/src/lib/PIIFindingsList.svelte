@@ -1,6 +1,9 @@
 <script lang="ts">
+    import { startRefresh } from "./refresh";
+    import { piiRefreshTick } from "./liveRefreshStores";
     import { onMount, onDestroy } from "svelte";
     import { autoRefreshEnabled } from "../lib/stores";
+    import { latestOnly, isAbort } from "./latestOnly";
     import { getPIIFindings, type PIIFindingItem, type PIIListResponse } from "../lib/api";
     import { deriveState, errorMessage } from "../lib/dataState";
     import DataStateBanner from "../lib/DataStateBanner.svelte";
@@ -9,7 +12,7 @@
     let findings: PIIFindingItem[] = [];
     let page: PIIListResponse["page"] | null = null;
     let error: unknown = null;
-    let refreshTimer: ReturnType<typeof setInterval>;
+    let stopRefresh: (() => void) | undefined;
     let hasLoadedOnce = false;
     let isFetching = false;
 
@@ -41,28 +44,56 @@
         });
     }
 
+    const latest = latestOnly();
+    let loadingMore = false;
+
+    function findingsParams(offset: number): string {
+        const params = new URLSearchParams();
+        if (piiTypeFilter) params.set("pii_type", piiTypeFilter);
+        if (sourceFilter) params.set("source", sourceFilter);
+        if (policyActionFilter) params.set("policy_action", policyActionFilter);
+        if (runIdFilter) params.set("run_id", runIdFilter);
+        if (detectorIdFilter) params.set("detector_id", detectorIdFilter);
+        params.set("limit", "50");
+        params.set("offset", String(offset));
+        return `?${params.toString()}`;
+    }
+
+    // Batch 7 (RFC-009 §20): the next 50, appended. Uses the same latest-only guard, so a filter change while it is in flight wins.
+    async function loadMore() {
+        if (loadingMore || !page?.has_more) return;
+        loadingMore = true;
+        const req = latest.start();
+        try {
+            const res = await getPIIFindings(findingsParams(findings.length), req.signal);
+            if (!req.isCurrent()) return;
+            findings = [...findings, ...res.piis];
+            page = res.page;
+        } catch (e) {
+            if (!isAbort(e) && req.isCurrent()) error = e;
+        } finally {
+            loadingMore = false;
+        }
+    }
+
     async function loadFindings() {
+        const req = latest.start();
         isFetching = true;
         commitFilters();
         try {
-            const params = new URLSearchParams();
-            if (piiTypeFilter) params.set("pii_type", piiTypeFilter);
-            if (sourceFilter) params.set("source", sourceFilter);
-            if (policyActionFilter) params.set("policy_action", policyActionFilter);
-            if (runIdFilter) params.set("run_id", runIdFilter);
-            if (detectorIdFilter) params.set("detector_id", detectorIdFilter);
-            params.set("limit", "50");
-            params.set("offset", "0");
-
-            const res = await getPIIFindings(`?${params.toString()}`);
+            const res = await getPIIFindings(findingsParams(0), req.signal);
+            if (!req.isCurrent()) return;
             findings = res.piis;
             page = res.page;
             error = null;
         } catch (e) {
+            if (isAbort(e) || !req.isCurrent()) return;
             error = e;
         } finally {
-            isFetching = false;
-            hasLoadedOnce = true;
+            if (req.isCurrent()) {
+                isFetching = false;
+                hasLoadedOnce = true;
+            }
         }
     }
 
@@ -79,14 +110,12 @@
         ready = true;
         loadFindings();
     
-        refreshTimer = setInterval(() => {
-            if ($autoRefreshEnabled) loadFindings();
-        }, 10000);
+        stopRefresh = startRefresh(loadFindings, { ticks: [piiRefreshTick], gaugeEveryMs: 30000 });
     });
 
    onDestroy(() => {
         unsubscribePath?.();
-        clearInterval(refreshTimer);
+        stopRefresh?.();
     });
 
     $: state = deriveState({ hasLoadedOnce, isFetching, error, isEmpty: findings.length === 0 });
@@ -102,6 +131,7 @@
             <option value="REDACT">REDACT</option>
             <option value="MASK">MASK</option>
             <option value="OBSERVE">OBSERVE</option>
+            <option value="BLOCK">BLOCK</option>
         </select>
     </label>
     <label>Run ID:<input type="text" bind:value={runIdFilter} on:change={loadFindings} placeholder="exact job id" /></label>
@@ -134,10 +164,10 @@
                 <span>{f.source}</span>
                 <span>{f.field_path || "—"}</span>
                 <span>{(f.confidence * 100).toFixed(0)}%</span>
-                <span class="badge" class:redact={f.policy_action === "REDACT"} class:mask={f.policy_action === "MASK"}>{f.policy_action}</span>
+                <span class="badge" class:redact={f.policy_action === "REDACT"} class:mask={f.policy_action === "MASK"} class:block={f.policy_action === "BLOCK"}>{f.policy_action}</span>
                 <span class="run-id">{f.run_id.slice(0, 8)}…</span>
-                <span class="gap" title="not available -- always empty for pre-execution scans, no Attempt exists yet at detection time">—</span>
-                <span>{f.detector_id} <span class="gap" title="detectors are not versioned in this system yet">(v?)</span></span>
+                <span class="gap" title="not available -- always empty for pre-execution scans, no Attempt exists yet at detection time">n/a (no attempt yet)</span>
+                <span>{f.detector_id} <span class="gap" title="detectors are not versioned in this system yet">(unversioned)</span></span>
                 <span>{f.policy_name} v{f.policy_version}</span>
                 <span>{f.rule_id}</span>
                 <span>{f.mask_strategy || "n/a"}</span>
@@ -145,6 +175,9 @@
             </div>
         {/each}
     </div>
+    {#if page?.has_more}
+        <button class="load-more" on:click={loadMore} disabled={loadingMore}>{loadingMore ? "Loading…" : "Load more"}</button>
+    {/if}
 
     <p class="gap-summary">
         "Attempt" is always empty -- these findings come from pre-execution
@@ -180,6 +213,7 @@
     .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: bold; background: #eee; width: fit-content; }
     .badge.redact { background: #fee2e2; color: #991b1b; }
     .badge.mask { background: #fef3c7; color: #92400e; }
+    .badge.block { background: #fce7f3; color: #9d174d; }
 
     .gap-summary { margin-top: 16px; padding: 12px; background: #fafafa; border-radius: 4px; font-size: 12px; color: #888; }
 

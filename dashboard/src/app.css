@@ -20,3 +20,48 @@ select {
 * {
     box-sizing: border-box;
 }
+
+/* Batch 7 (RFC-009 §22): a visible keyboard focus ring on everything that can take focus. :focus-visible so a mouse click does not draw it. */
+:focus-visible {
+    outline: 2px solid #1e40af;
+    outline-offset: 2px;
+}
+
+[role="button"]:focus-visible {
+    outline-offset: -2px;
+}
+
+/* Batch 7 (RFC-009 §22): below tablet width the 4-column card grids collapse and wide row grids scroll inside their own box instead of
+   pushing the whole page sideways. */
+@media (max-width: 900px) {
+    .cards {
+        grid-template-columns: repeat(2, 1fr) !important;
+    }
+    main,
+    .pii-table,
+    .alert-table,
+    .run-table,
+    .worker-table,
+    .queue-table,
+    .schedule-table {
+        overflow-x: auto;
+    }
+    .pii-row,
+    .alert-row,
+    .run-row,
+    .worker-row,
+    .queue-row,
+    .schedule-row {
+        min-width: 720px;
+    }
+}
+
+@media (max-width: 600px) {
+    .cards {
+        grid-template-columns: 1fr !important;
+    }
+    .filter-bar {
+        flex-direction: column;
+        align-items: stretch !important;
+    }
+}

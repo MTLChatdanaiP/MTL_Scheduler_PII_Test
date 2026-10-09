@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount } from "svelte";
-    import { getPolicyHistory, getPolicyRules, getPolicyDetectors } from "./api";
+    import { getPolicyHistory, getPolicyRules, getPolicyDetectors, getActivePolicy, type PolicyDrift } from "./api";
+    import { driftMessage } from "./policyView";
     import { deriveState, errorMessage } from "./dataState";
     import DataStateBanner from "./DataStateBanner.svelte";
 
@@ -14,6 +15,8 @@
     import type { PolicyActivationItem, PolicyRuleSummary, PolicyDetectorSummary } from "./api";
 
     let history: PolicyActivationItem[] = [];
+    let drift: PolicyDrift | null = null;
+    $: drift_note = driftMessage(drift);
     let rules: PolicyRuleSummary[] = [];
     let detectors: PolicyDetectorSummary[] = [];
     let error: unknown = null;
@@ -27,6 +30,13 @@
             history = h.activations ?? [];
             rules = r.rules ?? [];
             detectors = d.detectors ?? [];
+
+            // RFC-006 §32: is the file on disk still the policy that is active? Best-effort: an older backend has no `drift`.
+            try {
+                drift = (await getActivePolicy()).drift ?? null;
+            } catch {
+                drift = null;
+            }
             error = null;
         } catch (e) {
             error = e;
@@ -40,6 +50,10 @@
 </script>
 
 <h4>PII Policy</h4>
+
+{#if drift_note}
+    <p class="drift-note {drift_note.kind}">⚠ {drift_note.text}</p>
+{/if}
 
 {#if state === "READY" || state === "REFRESHING"}
     <div class="grid">
@@ -82,6 +96,8 @@
 {/if}
 
 <style>
+    .drift-note { margin: 0 0 12px; padding: 8px 12px; border-radius: 6px; font-size: 12px; background: #fef3c7; color: #92400e; }
+    .drift-note.unreadable { background: #f1f5f9; color: #475569; }
     h4 { font-size: 13px; margin: 20px 0 8px; color: #555; }
     .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
     .card { border: 1px solid #ddd; border-radius: 8px; padding: 10px; }

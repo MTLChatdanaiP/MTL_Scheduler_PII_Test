@@ -91,6 +91,8 @@ func ValidateRules(alertRules models.AlertRules) []string {
 				),
 			)
 		}
+		// A typo in a metric name or an operator did not fail anywhere: the rule simply never fired.
+		problems = append(problems, validateRuleCondition(rule)...)
 		if _, ok := validSeverities[rule.Severity]; !ok {
 			problems = append(problems,
 				fmt.Sprintf(
@@ -143,4 +145,33 @@ func ActivateRules(ctx context.Context, path string, source string) (models.Aler
 	events.LogEvent(ctx, "system", "alerting.alert_activated", source)
 
 	return rules, nil
+}
+
+// validOperators are the comparison operators conditionMatches understands.
+var validOperators = map[string]bool{"GT": true, "GTE": true, "LT": true, "LTE": true, "EQ": true, "NEQ": true}
+
+// validateRuleCondition takes one rule and returns a message for every reason its condition could never work:
+// a METRIC rule naming a metric no resolver provides or an operator conditionMatches does not know (or EQ/NEQ
+// with nothing to compare to), and an ANNOTATION rule with no annotation type.
+func validateRuleCondition(rule models.AlertRule) []string {
+	var problems []string
+
+	switch rule.Source {
+	case "METRIC":
+		if _, ok := MetricResolvers[rule.Metric]; !ok {
+			problems = append(problems, fmt.Sprintf("rule %q: unknown metric %q, so it can never fire", rule.ID, rule.Metric))
+		}
+		switch {
+		case !validOperators[rule.Operator]:
+			problems = append(problems, fmt.Sprintf("rule %q: unknown operator %q (use GT, GTE, LT, LTE, EQ or NEQ), so it can never fire", rule.ID, rule.Operator))
+		case (rule.Operator == "EQ" || rule.Operator == "NEQ") && rule.TextValue == "":
+			problems = append(problems, fmt.Sprintf("rule %q: operator %s needs a textValue to compare to", rule.ID, rule.Operator))
+		}
+	case "ANNOTATION":
+		if rule.AnnotationType == "" {
+			problems = append(problems, fmt.Sprintf("rule %q: an ANNOTATION rule needs an annotationType", rule.ID))
+		}
+	}
+
+	return problems
 }

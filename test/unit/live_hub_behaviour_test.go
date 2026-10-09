@@ -115,7 +115,7 @@ func TestSlowClient_NormalEventAlsoCuts_NotDropped(t *testing.T) {
 // RFC-010 §19 coalescing
 
 func TestCoalescing_SecondUpdateToSameResourceIsSuppressed(t *testing.T) {
-	hub := live.NewHub()
+	hub := live.NewCoalescingHub()
 	ch := hub.Subscribe()
 	defer hub.Unsubscribe(ch)
 
@@ -130,7 +130,7 @@ func TestCoalescing_SecondUpdateToSameResourceIsSuppressed(t *testing.T) {
 }
 
 func TestCoalescing_DifferentResourcesAreNeverCoalescedTogether(t *testing.T) {
-	hub := live.NewHub()
+	hub := live.NewCoalescingHub()
 	ch := hub.Subscribe()
 	defer hub.Unsubscribe(ch)
 
@@ -144,7 +144,7 @@ func TestCoalescing_DifferentResourcesAreNeverCoalescedTogether(t *testing.T) {
 }
 
 func TestCoalescing_CriticalEventsAreNeverCoalescedAway(t *testing.T) {
-	hub := live.NewHub()
+	hub := live.NewCoalescingHub()
 	ch := hub.Subscribe()
 	defer hub.Unsubscribe(ch)
 

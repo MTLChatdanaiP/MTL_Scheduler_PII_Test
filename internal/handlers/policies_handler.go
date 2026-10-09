@@ -17,6 +17,9 @@ type ActivePolicyResponse struct {
 	DetectorCount  int                     `json:"detector_count"`
 	RuleCount      int                     `json:"rule_count"`
 	LastActivation models.PolicyActivation `json:"last_activation"`
+
+	// RFC-006 §32: whether the file on disk still matches the active policy. Additive.
+	Drift pii.DriftStatus `json:"drift"`
 }
 
 func GetActivePolicy(c *gin.Context) {
@@ -39,6 +42,7 @@ func GetActivePolicy(c *gin.Context) {
 	activePolicyReponse.Checksum = metadata.Checksum
 	activePolicyReponse.DetectorCount = len(policy.Spec.Detectors)
 	activePolicyReponse.RuleCount = len(policy.Spec.Rules)
+	activePolicyReponse.Drift = pii.CheckPolicyDrift(pii.DefaultPolicyPath)
 
 	c.JSON(http.StatusOK, activePolicyReponse)
 }
@@ -46,7 +50,9 @@ func GetActivePolicy(c *gin.Context) {
 func PostReloadPolicy(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	policy, err := pii.ActivatePolicy(ctx, "policies/default.json", "MANUAL_RELOAD", "api")
+	// RFC-006 §33: the activation is audited with the authenticated principal, which
+	// the auth middleware stores under "actor". It used to record the literal "api".
+	policy, err := pii.ActivatePolicyAs(ctx, "policies/default.json", "MANUAL_RELOAD", "api", c.GetString("actor"))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

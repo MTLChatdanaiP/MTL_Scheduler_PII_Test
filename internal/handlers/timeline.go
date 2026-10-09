@@ -3,6 +3,7 @@ package handlers // or a new internal/timeline package if you prefer
 import (
 	"MTL_Scheduler_PII_Test/internal/auth"
 	"MTL_Scheduler_PII_Test/internal/database"
+	evlog "MTL_Scheduler_PII_Test/internal/events"
 	"MTL_Scheduler_PII_Test/internal/models"
 	"context"
 	"errors"
@@ -35,6 +36,16 @@ func timelineFromEvents(events []models.EventEnvelope) []TimelineEntry {
 
 	for _, event := range events {
 		entry := TimelineEntry{OccurredAt: event.OccurredAt, EventType: event.EventType, RunID: event.JobId, Source: "EVENT"}
+		if event.AttemptID != "" {
+			entry.Detail = map[string]interface{}{"attempt_id": event.AttemptID, "worker_id": event.WorkerID}
+		}
+		// RFC-005 §16: which Redis delivery this event belongs to, so a publish can be matched to the claim
+		if event.StreamPosition != "" {
+			if entry.Detail == nil {
+				entry.Detail = map[string]interface{}{}
+			}
+			entry.Detail["stream_position"] = event.StreamPosition
+		}
 		entries = append(entries, entry)
 	}
 
@@ -46,17 +57,17 @@ func timelineFromAttempts(attempts []models.Attempt) []TimelineEntry {
 
 	for _, attempt := range attempts {
 		if !attempt.ClaimedAt.IsZero() {
-			claimedDetail := map[string]interface{}{"worker_id": attempt.WorkerId, "attempt_number": attempt.AttemptNumber}
+			claimedDetail := map[string]interface{}{"attempt_id": attempt.AttemptId, "worker_id": attempt.WorkerId, "attempt_number": attempt.AttemptNumber}
 			entry := TimelineEntry{OccurredAt: attempt.ClaimedAt, EventType: "attempt.claimed", RunID: attempt.JobId, Source: "ATTEMPT", Detail: claimedDetail}
 			entries = append(entries, entry)
 		}
 		if !attempt.StartedAt.IsZero() {
-			startedDetail := map[string]interface{}{"worker_id": attempt.WorkerId, "attempt_number": attempt.AttemptNumber}
+			startedDetail := map[string]interface{}{"attempt_id": attempt.AttemptId, "worker_id": attempt.WorkerId, "attempt_number": attempt.AttemptNumber}
 			entry := TimelineEntry{OccurredAt: attempt.StartedAt, EventType: "attempt.started", RunID: attempt.JobId, Source: "ATTEMPT", Detail: startedDetail}
 			entries = append(entries, entry)
 		}
 		if !attempt.FinishedAt.IsZero() {
-			finishedDetail := map[string]interface{}{"worker_id": attempt.WorkerId, "attempt_number": attempt.AttemptNumber, "status": attempt.Status, "failure_category": attempt.FailureCategory}
+			finishedDetail := map[string]interface{}{"attempt_id": attempt.AttemptId, "worker_id": attempt.WorkerId, "attempt_number": attempt.AttemptNumber, "status": attempt.Status, "failure_category": attempt.FailureCategory}
 			entry := TimelineEntry{OccurredAt: attempt.FinishedAt, EventType: "attempt.finished", RunID: attempt.JobId, Source: "ATTEMPT", Detail: finishedDetail}
 			entries = append(entries, entry)
 		}
@@ -205,8 +216,15 @@ func buildTimeline(ctx context.Context, chainID string, canReadPII bool) ([]Time
 	}
 
 	var all []TimelineEntry // all  []TimelineEntry
-	all = append(all, timelineFromEvents(events)...)
-	all = append(all, timelineFromAttempts(attempts)...)
+	// RFC-005 §16: a total order (time, then producer, then that producer's sequence, then id) so ties are deterministic
+	evlog.SortEvents(events)
+
+	eventEntries := timelineFromEvents(events)
+	// real attempt events carry the attempt id but not its number, so the timeline adds it from the attempts it already loaded
+	enrichAttemptEvents(eventEntries, attempts)
+	all = append(all, eventEntries...)
+	// RFC-005 §5: a synthesized attempt entry is dropped when a real attempt event already covers it
+	all = append(all, dropCoveredAttemptEntries(eventEntries, timelineFromAttempts(attempts))...)
 	all = append(all, timelineFromPII(piiRecords)...)
 	all = append(all, timelineFromAlerts(alerts)...)
 	all = append(all, timelineFromAnnotations(annotations)...)

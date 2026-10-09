@@ -32,8 +32,8 @@ export interface AlertsResponse {
     live: Live;
 }
 
-export function getAlerts(params: string = ""): Promise<AlertsResponse> {
-    return apiFetch(`/alerts${params}`);
+export function getAlerts(params: string = "", signal?: AbortSignal): Promise<AlertsResponse> {
+    return apiFetch(`/alerts${params}`, { signal });
 }
 
 export function acknowledgeAlert(alertId: string): Promise<{ alert_id: string; status: string; acknowledged_by: string }> {
@@ -43,6 +43,9 @@ export function acknowledgeAlert(alertId: string): Promise<{ alert_id: string; s
 // ---------------------------------------------------------------- Runs
 
 export interface RunListItem {
+    // Batch 7 (RFC-001 §5): the RFC's name for this run's state (SCHEDULED, QUEUED, RUNNING, SUCCEEDED, FAILED, TIMED_OUT, DEAD, UNKNOWN).
+    // Optional: an older backend does not send it.
+    rfc_state?: string;
     // gorm.Model fields, also untagged, also PascalCase
     ID: number;
     CreatedAt: string;
@@ -76,6 +79,22 @@ export interface RunListItem {
     pii_finding_count: number;
     was_reclaimed: boolean;
     last_event_at: string;
+
+    // models.Task fields added in Batches 2 and 3 (flattened and PascalCase like the rest of models.Task). Optional: an older
+    // backend does not send them.
+    TraceID?: string;
+    ScheduleOccurrenceId?: string;
+    PublishedAt?: string | null;
+
+    // RFC-005 §7 Run Projection fields added in Batch 4. Optional for the same reason.
+    latest_attempt_id?: string;
+    latest_attempt_status?: string;
+    latest_worker_id?: string;
+    attempt_count?: number;
+    active_annotation_count?: number;
+    open_alert_count?: number;
+    contradicted?: boolean;
+    contradiction_note?: string;
 
     attempts: unknown[];
 
@@ -114,8 +133,8 @@ export interface RunDetailResponse {
     payload_size_bytes: number;
 }
 
-export function getRuns(params: string = ""): Promise<RunsListResponse> {
-    return apiFetch(`/runs${params}`);
+export function getRuns(params: string = "", signal?: AbortSignal): Promise<RunsListResponse> {
+    return apiFetch(`/runs${params}`, { signal });
 }
 
 export function getRunDetail(runId: string): Promise<RunDetailResponse> {
@@ -156,6 +175,11 @@ export interface QueueHealth {
     OldestPendingAgeSeconds: number;
     ConsumerCount: number;
     SampledAt: string;
+    // runs that finished (completed or failed) per minute over the last five minutes. Optional for an older backend.
+    ThroughputPerMinute?: number;
+    // Batch 7: the server's own verdict (same threshold as the QUEUE_BACKLOG alert). Optional for an older backend.
+    health?: string; // HEALTHY | DEGRADED
+    health_reason?: string;
 }
  
 export interface QueuesListResponse {
@@ -190,6 +214,10 @@ export interface WorkerListItem {
     LastHeartbeat: string;
     RunningAttempts: number;
     Capacity: number;
+    // RFC-005 §7 Worker Projection, derived by the backend. Optional: an older backend does not send them.
+    health?: string; // HEALTHY | DEGRADED | OFFLINE | UNKNOWN
+    health_reason?: string;
+    build_revision?: string;
 }
 
 export interface WorkerDetailItem extends WorkerListItem {
@@ -256,11 +284,40 @@ export interface SchedulesListResponse {
     live: Live;
 }
  
+// RFC-002 §14 / RFC-005 §7: one expected occurrence of a schedule. A SKIPPED one has no run and used to exist nowhere.
+export interface ScheduleOccurrence {
+    schedule_id: string;
+    occurrence_id: string;
+    expected_at: string;
+    outcome: string; // DUE | CREATED | SKIPPED
+    run_id: string;
+    creation_lateness_seconds: number | null;
+    start_lateness_seconds: number | null;
+    recorded_at: string;
+    last_event_at: string;
+}
+
+export interface ScheduleProjection {
+    schedule_id: string;
+    last_expected_at: string;
+    last_occurrence_id: string;
+    last_run_id: string;
+    last_creation_lateness_seconds: number | null;
+    last_start_lateness_seconds: number | null;
+    occurrences_created: number;
+    occurrences_skipped: number;
+    last_skipped_at: string | null;
+    last_event_at: string;
+}
+
 export interface ScheduleDetailResponse {
     schedule: ScheduleDefinition;
     recent_runs: ScheduleRunItem[];
     annotations: MonitoringAnnotationItem[];
     next_expected_at: string | null;
+    // Optional: an older backend does not send them.
+    projection?: ScheduleProjection | null;
+    occurrences?: ScheduleOccurrence[];
     freshness: Freshness;
     live: Live;
 }
@@ -309,8 +366,8 @@ export interface PIIListResponse {
     live: Live;
 }
  
-export function getPIIFindings(params: string = ""): Promise<PIIListResponse> {
-    return apiFetch(`/pii/findings${params}`);
+export function getPIIFindings(params: string = "", signal?: AbortSignal): Promise<PIIListResponse> {
+    return apiFetch(`/pii/findings${params}`, { signal });
 }
 
 // ---------------------------------------------------------------- PII Policy Dashboard (RFC-006 §31)
@@ -406,6 +463,69 @@ export function getMonitoringHealth(): Promise<MonitoringHealthResponse> {
     return apiFetch(`/monitoring/health`);
 }
 
+// ---------------------------------------------------------------- Components (RFC-005 §7 Component Health Projection)
+
+export interface ComponentHealthItem {
+    component_type: string;
+    component_instance_id: string;
+    display_name: string;
+    build_revision: string;
+    started_at: string;
+    last_heartbeat: string | null; // null: it has never reported one
+    health: string; // HEALTHY | DEGRADED | OFFLINE | UNKNOWN
+    reason: string;
+    evidence: Record<string, unknown>;
+
+    // RFC-010 §8/§9 names for the same facts. Optional: an older backend sends none of them.
+    component_kind?: string; // API, SCHEDULER, WORKER, MONITORING_INGESTOR, ...
+    status?: string; // same value as health, plus UNHEALTHY
+    status_reason?: string; // same value as reason
+    observed_lag_ms?: number; // set when the verdict is about a lag or an age
+    threshold_ms?: number; // the threshold that applied
+}
+
+export interface DependencyStatus {
+    name: string;
+    status: string; // OK | UNAVAILABLE
+    detail: string;
+}
+
+export interface ComponentsResponse {
+    components: ComponentHealthItem[];
+    // RFC-010 §8: components that are not a registered process (API, Redis delivery, the monitoring pipeline, the PII scanner, the
+    // alert evaluator, the live gateway), judged by the server. Absent on an older backend.
+    derived?: ComponentHealthItem[];
+    dependencies: DependencyStatus[];
+    observed_by: { build_revision: string };
+    generated_at: string;
+}
+
+export function getComponents(): Promise<ComponentsResponse> {
+    return apiFetch(`/components`);
+}
+
+// ---------------------------------------------------------------- Active policy + drift (RFC-006 §32)
+
+export interface PolicyDrift {
+    drifted: boolean;
+    active_checksum: string;
+    file_checksum: string;
+    file_error?: string; // set when the file could not be read or parsed; never contains the file's contents
+}
+
+export interface ActivePolicyResponse {
+    name: string;
+    version: number;
+    checksum: string;
+    detector_count: number;
+    rule_count: number;
+    drift?: PolicyDrift; // optional: an older backend does not send it
+}
+
+export function getActivePolicy(): Promise<ActivePolicyResponse> {
+    return apiFetch(`/pii/policy/active`);
+}
+
 // ---------------------------------------------------------------- Overview
 
 export interface OverviewResponse {
@@ -414,6 +534,8 @@ export interface OverviewResponse {
     open_alerts: number;
     degraded_queues: number;
     offline_workers: number;
+    // Batch 7: execution chains that are waiting on or running a retry. Optional for an older backend.
+    retrying_chains?: number;
     freshness: Freshness;
     live: Live;
 }
@@ -438,6 +560,7 @@ export interface Page {
     limit: number;
     count: number;
     has_more: boolean;
+    next_cursor?: string; // set in cursor mode (Alerts, Runs); pass it back as ?cursor=
     offset?: number;
     total?: number;
 }

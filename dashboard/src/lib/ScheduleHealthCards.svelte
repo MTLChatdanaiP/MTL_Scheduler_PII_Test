@@ -1,10 +1,11 @@
 <script lang="ts">
+    import { startRefresh } from "./refresh";
     import { onMount, onDestroy } from "svelte";
     import { autoRefreshEnabled } from "../lib/stores";
     import { getSchedules, getScheduleDetail, getAlerts, type ScheduleDefinition, type ScheduleDetailResponse } from "../lib/api";
     import { deriveState, errorMessage } from "../lib/dataState";
     import DataStateBanner from "../lib/DataStateBanner.svelte";
-    import { overviewRefreshTick } from "../lib/liveRefreshStores";
+    import { overviewRefreshTick, scheduleRefreshTick } from "../lib/liveRefreshStores";
 
     // A start is "late" if the run actually started noticeably after its
     // expected time. 30s is a starting guess, not a value confirmed anywhere
@@ -15,7 +16,7 @@
     let details: Record<string, ScheduleDetailResponse> = {};
     let missedCount = 0;
     let error: unknown = null;
-    let refreshTimer: ReturnType<typeof setInterval>;
+    let stopRefresh: (() => void) | undefined;
     let hasLoadedOnce = false;
     let isFetching = false;
 
@@ -48,12 +49,10 @@
 
     onMount(() => {
         loadSchedules();
-        refreshTimer = setInterval(() => {
-            if ($autoRefreshEnabled) loadSchedules();
-        }, 10000);
+        stopRefresh = startRefresh(loadSchedules, { gaugeEveryMs: 30000 });
     });
 
-    onDestroy(() => clearInterval(refreshTimer));
+    onDestroy(() => stopRefresh?.());
 
     $: state = deriveState({ hasLoadedOnce, isFetching, error, isEmpty: false });
 
@@ -77,6 +76,13 @@
     $: if ($overviewRefreshTick !== lastOverviewTick) {
         lastOverviewTick = $overviewRefreshTick;
         if (lastOverviewTick > 0) loadSchedules();
+    }
+
+    // the Schedules page's own live connection (it had none, so these cards only refreshed while Overview was open)
+    let lastScheduleTick = 0;
+    $: if ($scheduleRefreshTick !== lastScheduleTick) {
+        lastScheduleTick = $scheduleRefreshTick;
+        if (lastScheduleTick > 0) loadSchedules();
     }
 </script>
 

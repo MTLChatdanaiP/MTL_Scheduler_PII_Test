@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { categoryOf, filterEvents, countByCategory, bucketEvents, connectionBadge, formatAge } from "../src/lib/activity";
+import { categoryOf, filterEvents, countByCategory, bucketEvents, connectionBadge, formatAge, allVisible, emptyCounts } from "../src/lib/activity";
 import type { LiveEvent } from "../src/lib/liveClient";
 
 const ev = (id: number, type: string, at: string, subject = "subj"): LiveEvent => ({ id, type, subject, at });
 
-const SHOW_ALL = { task: true, alert: true, pii: true, other: true };
+const SHOW_ALL = allVisible();
 
 describe("categoryOf", () => {
     it("groups by the prefix before the first dot", () => {
@@ -13,7 +13,7 @@ describe("categoryOf", () => {
         expect(categoryOf("pii.detected")).toBe("pii");
     });
     it("puts everything else in 'other'", () => {
-        expect(categoryOf("worker.online")).toBe("other");
+        expect(categoryOf("something.unknown")).toBe("other");
         expect(categoryOf("")).toBe("other");
     });
 });
@@ -46,7 +46,7 @@ describe("filterEvents", () => {
 describe("countByCategory", () => {
     it("counts per category", () => {
         const c = countByCategory([ev(1, "task.a", "x"), ev(2, "task.b", "x"), ev(3, "pii.d", "x")]);
-        expect(c).toEqual({ task: 2, alert: 0, pii: 1, other: 0 });
+        expect(c).toEqual({ ...emptyCounts(), task: 2, pii: 1 });
     });
 });
 

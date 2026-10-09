@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { startRefresh } from "./refresh";
     import { onMount, onDestroy } from "svelte";
     import { autoRefreshEnabled } from "../lib/stores";
     import { getWorkers, type WorkerListItem } from "../lib/api";
@@ -10,24 +11,16 @@
     // (fresh/stale), but the RFC wants 3 (online/degraded/offline). A worker
     // just past the stale threshold is "degraded" (still probably alive,
     // heartbeat is late); one well past it is "offline" (assume it's gone).
-    const DEGRADED_HEARTBEAT_SECONDS = 60;
-    const OFFLINE_HEARTBEAT_SECONDS = 300;
+    import { workerStatusOf } from "./thresholds";
 
     let workers: WorkerListItem[] = [];
     let error: unknown = null;
-    let refreshTimer: ReturnType<typeof setInterval>;
+    let stopRefresh: (() => void) | undefined;
     let hasLoadedOnce = false;
     let isFetching = false;
 
-    function heartbeatAgeSeconds(w: WorkerListItem): number {
-        return (Date.now() - new Date(w.LastHeartbeat).getTime()) / 1000;
-    }
-
     function workerStatus(w: WorkerListItem): "online" | "degraded" | "offline" {
-        const age = heartbeatAgeSeconds(w);
-        if (age > OFFLINE_HEARTBEAT_SECONDS) return "offline";
-        if (age > DEGRADED_HEARTBEAT_SECONDS) return "degraded";
-        return "online";
+        return workerStatusOf(w);
     }
 
     async function loadWorkers() {
@@ -46,13 +39,11 @@
 
     onMount(() => {
         loadWorkers();
-        refreshTimer = setInterval(() => {
-            if ($autoRefreshEnabled) loadWorkers();
-        }, 10000);
+        stopRefresh = startRefresh(loadWorkers, { gaugeEveryMs: 10000 });
     });
 
     onDestroy(() => {
-        clearInterval(refreshTimer);
+        stopRefresh?.();
     });
 
     $: state = deriveState({ hasLoadedOnce, isFetching, error, isEmpty: false });

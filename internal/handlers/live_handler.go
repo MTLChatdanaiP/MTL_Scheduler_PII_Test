@@ -34,8 +34,10 @@ func matchesPrefix(eventType string, prefixes []string) bool {
 	return false
 }
 
-func writeSSE(w http.ResponseWriter, flusher http.Flusher, e live.Event) {
-	data, err := json.Marshal(e)
+// writeSSE sends one event as its RFC-010 §10 envelope. replayed is true for an event read back from the durable log after a
+// reconnect, so its freshness says REPLAYED instead of reporting the (large, harmless) time since it happened as pipeline lag.
+func writeSSE(w http.ResponseWriter, flusher http.Flusher, e live.Event, replayed bool) {
+	data, err := json.Marshal(live.NewEnvelope(e, time.Now(), replayed))
 	if err != nil {
 		return
 	}
@@ -65,6 +67,16 @@ func parseCursor(c *gin.Context) (uint, bool) {
 	return uint(n), true
 }
 
+// combineMatch ANDs the scope filter with the optional ?subject= narrowing. nil means "no narrowing".
+func combineMatch(scope func(live.Event) bool, subject string) func(live.Event) bool {
+	if subject == "" {
+		return scope
+	}
+	return func(e live.Event) bool {
+		return e.Subject == subject && (scope == nil || scope(e))
+	}
+}
+
 func GetLive(serverCtx context.Context, prefixes ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		w := c.Writer
@@ -73,6 +85,36 @@ func GetLive(serverCtx context.Context, prefixes ...string) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "streaming not supported"})
 			return
 		}
+
+		// RFC-010 §15: which scopes did the client ask for? Checked BEFORE any stream header is written so a bad request is a
+		// plain HTTP error, not a stream that opens and says nothing.
+		scopes, err := live.ParseScopes(c.QueryArray("scope"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		sub := live.Subscription{Scopes: scopes}
+
+		// "Authorization applies to the effective subscription": a scope the caller could not read through REST is refused out loud.
+		// A silent empty stream would look exactly like a quiet system.
+		for _, need := range sub.Permissions() {
+			if !auth.HasScope(c, need) {
+				c.JSON(http.StatusForbidden, gin.H{"error": "this API key lacks the scope " + need + ", which the requested subscription needs"})
+				return
+			}
+		}
+
+		// RFC-010 §19: one caller may only hold so many live connections at once.
+		caller := c.GetString("actor")
+		if caller == "" {
+			caller = "anonymous"
+		}
+		if !live.Limiter.Acquire(caller, live.MaxConnectionsPerKey()) {
+			c.Header("Retry-After", "5")
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many open live connections for this API key"})
+			return
+		}
+		defer live.Limiter.Release(caller)
 
 		// RFC-010 §25: scopes were placed on the request by auth.RequireScope.
 		// They are fixed for the life of this connection; a new connection
@@ -95,10 +137,11 @@ func GetLive(serverCtx context.Context, prefixes ...string) gin.HandlerFunc {
 		// This filters what is DELIVERED, not what is authorized: canSee still
 		// applies on top, so narrowing can never widen access.
 		subjectFilter := c.Query("subject")
+		match := combineMatch(sub.Match(), subjectFilter)
 
 		// Subscribe BEFORE replaying. Anything published while the replay
 		// query runs lands in the channel instead of falling into a gap.
-		ch := live.GlobalHub.SubscribeFiltered(subjectFilter)
+		ch := live.GlobalHub.SubscribeMatching(match, sub.WantsSummary())
 		defer live.GlobalHub.Unsubscribe(ch)
 
 		w.Write([]byte(": connected\n\n"))
@@ -111,9 +154,22 @@ func GetLive(serverCtx context.Context, prefixes ...string) gin.HandlerFunc {
 		delivered := map[uint]bool{}
 
 		if after, ok := parseCursor(c); ok {
+			// The two noise types are never streamed live (live.IsNoise), so they must not be replayed either: attempt.heartbeat alone is one
+			// row every 10 s per running attempt and would eat the 500-row cap, forcing a resync nobody needed.
 			q := database.DB.WithContext(c.Request.Context()).
 				Where("id > ?", after).
-				Where("event_type <> ?", "task.progress")
+				Where("event_type NOT IN ?", []string{"task.progress", "attempt.heartbeat"})
+
+			// RFC-010 §15: only the rows of the subscribed scopes, filtered BEFORE the row cap like the hidden-event rule below.
+			replayWanted := true
+			if !sub.Empty() {
+				cond, args, has := sub.ReplaySQL()
+				if has {
+					q = q.Where(cond, args...)
+				} else {
+					replayWanted = false // platform.summary only: there are no stored rows for it
+				}
+			}
 
 			if len(prefixes) > 0 {
 				conds := make([]string, len(prefixes))
@@ -134,20 +190,30 @@ func GetLive(serverCtx context.Context, prefixes ...string) gin.HandlerFunc {
 			}
 
 			var rows []models.EventEnvelope
-			if err := q.Order("id ASC").Limit(replayCap + 1).Find(&rows).Error; err != nil {
+			if !replayWanted {
+				// nothing to replay
+			} else if err := q.Order("id ASC").Limit(replayCap + 1).Find(&rows).Error; err != nil {
 				fmt.Println("[live] replay query failed:", err)
 			} else if len(rows) > replayCap {
-				w.Write([]byte("event: resync\ndata: {}\n\n"))
+				// RFC-010 §11 RESYNC_REQUIRED
+				body, _ := json.Marshal(live.NewResyncFrame())
+				fmt.Fprintf(w, "event: resync\ndata: %s\n\n", body)
 				flusher.Flush()
 				live.CountResync()
 			} else {
 				for _, r := range rows {
 					writeSSE(w, flusher, live.Event{
 						ID: r.ID, Type: r.EventType, Subject: r.JobId, At: r.OccurredAt.UTC(),
-					})
+						ChainID: r.ExecutionChainID, AttemptID: r.AttemptID,
+					}, true)
 					delivered[r.ID] = true
 				}
 				live.CountReplay(len(rows))
+
+				// The synthetic summary is never replayed, so a client that missed changes is told once that the overview may be stale.
+				if len(rows) > 0 && sub.WantsSummary() {
+					writeSSE(w, flusher, live.SummaryEvent(), false)
+				}
 			}
 		}
 
@@ -172,12 +238,12 @@ func GetLive(serverCtx context.Context, prefixes ...string) gin.HandlerFunc {
 				if !matchesPrefix(e.Type, prefixes) || !canSee(e.Type) || delivered[e.ID] {
 					continue
 				}
-				// Defence in depth: the hub already filters by subject, but a
+				// Defence in depth: the hub already filters by scope, but a
 				// replayed event takes a different path into this loop.
-				if subjectFilter != "" && e.Subject != subjectFilter {
+				if match != nil && !match(e) {
 					continue
 				}
-				writeSSE(w, flusher, e)
+				writeSSE(w, flusher, e, false)
 				if !e.At.IsZero() {
 					live.ObserveDeliveryLag(time.Since(e.At))
 				}

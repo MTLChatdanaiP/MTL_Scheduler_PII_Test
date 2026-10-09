@@ -9,6 +9,7 @@
         activeFilterCount,
         type TimeRange
     } from "./stores";
+    import { liveFallback, fallbackNotice } from "./liveFallback";
 
     let showAbsolute = false;
     let tick = 0;
@@ -66,6 +67,9 @@
         });
     }
 
+    // RFC-010 §27: when the page has dropped from live updates to polling (or stopped), say so.
+    $: notice = fallbackNotice($liveFallback);
+
     $: relativeLabel = tick >= 0 && $lastRefreshedAt
         ? formatRelative($lastRefreshedAt)
         : "Never updated";
@@ -118,7 +122,23 @@
     {/if}
 </div>
 
+{#if notice}
+    <div class="fallback-notice" class:stopped={$liveFallback.mode === "stopped"} role="alert">{notice}</div>
+{/if}
+
 <style>
+    .fallback-notice {
+        padding: 8px 20px;
+        font-size: 13px;
+        background: #fef3c7;
+        color: #92400e;
+        border-bottom: 1px solid #fcd34d;
+    }
+    .fallback-notice.stopped {
+        background: #fee2e2;
+        color: #991b1b;
+        border-bottom-color: #fca5a5;
+    }
     .global-bar {
         display: flex;
         gap: 16px;
@@ -145,4 +165,4 @@
         border: 1px solid #ccc;
         border-radius: 4px;
     }
-</style>
+</style>

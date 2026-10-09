@@ -36,6 +36,7 @@ var criticalTypes = map[string]bool{
 	"schedule.missed":              true,
 	"monitoring.degraded":          true, // MONITORING_DEGRADED
 	"component.offline":            true,
+	"pii.policy_violated":          true, // PII_POLICY_VIOLATED
 	"pii.policy_reload_failed":     true,
 	"pii.policy_validation_failed": true,
 }
@@ -67,6 +68,18 @@ func PriorityOf(eventType string) EventPriority {
 		}
 	}
 	return PriorityNormal
+}
+
+// PriorityOfEvent is PriorityOf plus what the event itself says about how serious it is.
+//
+// RFC-010 §20 lists only "ALERT_OPENED critical/high" as critical. An alert.opened for a WARNING or INFO alert is an ordinary state
+// change, so it is NORMAL. An alert.opened that carries no severity at all (an event replayed from the database, which does not
+// store it) keeps the critical default: ranking an unknown alert too HIGH is the safe direction, ranking it low is not.
+func PriorityOfEvent(e Event) EventPriority {
+	if e.Type == "alert.opened" && e.Severity != "" && e.Severity != "CRITICAL" {
+		return PriorityNormal
+	}
+	return PriorityOf(e.Type)
 }
 
 // ---------------------------------------------------------------------------
@@ -103,6 +116,8 @@ func shouldCoalesce(eventType, subject string, now time.Time) bool {
 	coalesceMu.Lock()
 	defer coalesceMu.Unlock()
 
+	pruneCoalesceLocked(now)
+
 	last, seen := lastPublished[key]
 	if seen && now.Sub(last) < coalesceWindow {
 		coalescedTotal++
@@ -117,4 +132,23 @@ func CoalescedTotal() int64 {
 	coalesceMu.Lock()
 	defer coalesceMu.Unlock()
 	return coalescedTotal
+}
+
+// lastCoalescePrune is when pruneCoalesceLocked last ran. Guarded by coalesceMu.
+var lastCoalescePrune time.Time
+
+// pruneCoalesceLocked forgets entries older than the coalescing window. Such an entry can never suppress anything again (an event
+// is only suppressed if the last one was LESS than a window ago), so forgetting it changes no decision; it only stops lastPublished
+// growing by one entry for every (event type, subject) ever published. It scans at most once a second, so the cost is negligible.
+// The caller must hold coalesceMu.
+func pruneCoalesceLocked(now time.Time) {
+	if now.Sub(lastCoalescePrune) < time.Second {
+		return
+	}
+	lastCoalescePrune = now
+	for key, at := range lastPublished {
+		if now.Sub(at) >= coalesceWindow {
+			delete(lastPublished, key)
+		}
+	}
 }

@@ -1,4 +1,9 @@
 <script lang="ts">
+    import SortControl from "./SortControl.svelte";
+    import Interpretation from "./Interpretation.svelte";
+    import { parseSort, sortBy } from "./sortView";
+    import { activateOnKey } from "./a11y";
+    import { startRefresh } from "./refresh";
     import { onMount, onDestroy } from "svelte";
     import { autoRefreshEnabled } from "../lib/stores";
     import { getWorkers, getWorkerDetail, type WorkerListItem, type WorkerDetailResponse } from "../lib/api";
@@ -7,13 +12,13 @@
     import JsonTree from "../lib/JsonTree.svelte";
     import { currentPath, parsePath, updateParams } from "../lib/router";
     import { workerRefreshTick } from "../lib/liveRefreshStores";
+    import { revisionLabel, type WorkerStatus } from "../lib/componentView";
+    import { workerStatusOf } from "./thresholds";
 
-    const DEGRADED_HEARTBEAT_SECONDS = 60;
-    const OFFLINE_HEARTBEAT_SECONDS = 300;
 
     let workers: WorkerListItem[] = [];
     let error: unknown = null;
-    let refreshTimer: ReturnType<typeof setInterval>;
+    let stopRefresh: (() => void) | undefined;
     let hasLoadedOnce = false;
     let isFetching = false;
 
@@ -46,6 +51,17 @@
         });
 }
 
+    // Batch 7: ?sort= (client-side -- the workers list is small and arrives whole).
+    const WORKER_SORTS = [
+        { key: "worker", label: "Worker" }, { key: "status", label: "Status" }, { key: "heartbeat", label: "Last heartbeat" },
+        { key: "utilization", label: "Utilization" }, { key: "hostname", label: "Hostname" },
+    ];
+    $: workerSort = parseSort(parsePath($currentPath).params.get("sort"), WORKER_SORTS.map((o) => o.key));
+    $: sortedWorkers = sortBy(visibleWorkers, workerSort, {
+        worker: (w) => w.WorkerId, status: (w) => workerStatus(w), heartbeat: (w) => new Date(w.LastHeartbeat).getTime(),
+        utilization: (w) => utilization(w), hostname: (w) => w.Hostname,
+    });
+
     $: visibleWorkers = workers.filter(w => {
         if (workerIdFilter && !w.WorkerId.toLowerCase().includes(workerIdFilter.toLowerCase())) return false;
         if (statusFilter && workerStatus(w) !== statusFilter) return false;
@@ -57,11 +73,10 @@
         return (Date.now() - new Date(w.LastHeartbeat).getTime()) / 1000;
     }
 
-    function workerStatus(w: WorkerListItem): "online" | "degraded" | "offline" {
-        const age = heartbeatAgeSeconds(w);
-        if (age > OFFLINE_HEARTBEAT_SECONDS) return "offline";
-        if (age > DEGRADED_HEARTBEAT_SECONDS) return "degraded";
-        return "online";
+    // RFC-005 §7: the backend derives health with the same thresholds the monitoring sweep uses, so this prefers it. The age-based
+    // answer below is only the fallback for an older backend that sends none.
+    function workerStatus(w: WorkerListItem): WorkerStatus {
+        return workerStatusOf(w);
     }
 
     function utilization(w: WorkerListItem): number {
@@ -108,14 +123,12 @@
         });
     
         loadWorkers();
-        refreshTimer = setInterval(() => {
-            if ($autoRefreshEnabled) loadWorkers();
-        }, 10000);
+        stopRefresh = startRefresh(loadWorkers, { gaugeEveryMs: 10000 });
     });
 
     onDestroy(() => {
         unsubscribePath?.();
-        clearInterval(refreshTimer);
+        stopRefresh?.();
     });
 
     $: state = deriveState({ hasLoadedOnce, isFetching, error, isEmpty: workers.length === 0 });
@@ -167,6 +180,8 @@
     </label>
 </div>
 
+<div class="filter-bar"><SortControl options={WORKER_SORTS} /></div>
+
 <div class="worker-table">
     <div class="worker-row header">
         <span>Worker</span>
@@ -184,18 +199,18 @@
     </div>
 
     {#if state === "READY" || state === "REFRESHING"}
-        {#each visibleWorkers as w (w.WorkerId)}
+        {#each sortedWorkers as w (w.WorkerId)}
             <div
                 class="worker-row clickable"
                 on:click={() => toggleExpanded(w.WorkerId)}
                 role="button"
                 tabindex="0"
-                on:keydown={(e) => e.key === "Enter" && toggleExpanded(w.WorkerId)}
+                on:keydown={(e) => activateOnKey(e, () => toggleExpanded(w.WorkerId))}
             >
                 <span class="worker-id">{w.WorkerId}</span>
-                <span class="badge" class:online={workerStatus(w) === "online"} class:degraded={workerStatus(w) === "degraded"} class:offline={workerStatus(w) === "offline"}>
+                <span class="badge" class:online={workerStatus(w) === "online"} class:degraded={workerStatus(w) === "degraded"} class:offline={workerStatus(w) === "offline"} title={`${w.health_reason ?? ""}${w.build_revision !== undefined ? ` · build ${revisionLabel(w.build_revision)}` : ""}`.trim()}>
                     {workerStatus(w)}
-                </span>
+                </span><Interpretation basis={w.health_reason ?? "heartbeat age against the offline thresholds"} />
                 <span>{heartbeatAgeSeconds(w).toFixed(0)}s ago</span>
                 <span class="gap">—</span>
                 <span class="gap">—</span>

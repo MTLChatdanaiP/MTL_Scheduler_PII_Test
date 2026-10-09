@@ -15,8 +15,7 @@ import (
 )
 
 const (
-	queuehealthInterval      = 20 * time.Second //random time lol
-	degradedPendingThreshold = 20
+	queuehealthInterval = 20 * time.Second //random time lol
 )
 
 var (
@@ -30,7 +29,7 @@ var (
 )
 
 func queueStatusFor(q models.QueueHealth) string {
-	if q.PendingCount > degradedPendingThreshold {
+	if health, _ := models.QueueVerdict(q); health == "DEGRADED" {
 		return "degraded"
 	}
 	return "healthy"
@@ -83,6 +82,8 @@ func SampleQueueHealth(ctx context.Context, sampleSize int64) (models.QueueHealt
 		OldestPendingAgeSeconds: int64(oldestPendingAge.Seconds()),
 		ConsumerCount:           len(consumers),
 		SampledAt:               time.Now().UTC(),
+
+		ThroughputPerMinute: throughputPerMinute(ctx, time.Now().UTC()),
 	}
 
 	return result, nil
@@ -100,7 +101,7 @@ func StartQueueHealth(ctx context.Context) {
 		if err != nil {
 			fmt.Println("FAILED TO SAMPLE QUEUE HEALTH: ", err)
 			if cache.IsUnavailable(err) {
-				events.LogEvent(ctx, "system", "redis.unavailable", "queue-monitor")
+				events.LogEventEvery(ctx, events.RedisDownEventEvery, "system", "redis.unavailable", "queue-monitor")
 			}
 			time.Sleep(queuehealthInterval)
 			continue
@@ -110,7 +111,7 @@ func StartQueueHealth(ctx context.Context) {
 		if err2 != nil {
 			fmt.Println("FAILED TO WRITE QUEUE HEALTH: ", err)
 			if cache.IsUnavailable(err) {
-				events.LogEvent(ctx, "system", "redis.unavailable", "queue-monitor")
+				events.LogEventEvery(ctx, events.RedisDownEventEvery, "system", "redis.unavailable", "queue-monitor")
 			}
 			time.Sleep(queuehealthInterval)
 			continue
@@ -146,4 +147,19 @@ func StartQueueHealth(ctx context.Context) {
 
 		time.Sleep(queuehealthInterval)
 	}
+}
+
+// throughputWindow is how far back the throughput estimate looks.
+const throughputWindow = 5 * time.Minute
+
+// throughputPerMinute takes a context and the current time and returns how many runs finished (task.completed or
+// task.failed) per minute over the last throughputWindow, counted from the event log. RFC-005 §7 Queue Projection asks for
+// "throughput estimates"; this is an estimate of finished work, not of publishes.
+func throughputPerMinute(ctx context.Context, now time.Time) float64 {
+	var finished int64
+	database.DB.WithContext(ctx).Model(&models.EventEnvelope{}).
+		Where("event_type IN ? AND occurred_at >= ? AND occurred_at <= ?", []string{"task.completed", "task.failed"}, now.Add(-throughputWindow), now).
+		Count(&finished)
+
+	return float64(finished) / throughputWindow.Minutes()
 }

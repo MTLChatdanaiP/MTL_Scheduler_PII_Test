@@ -1,8 +1,15 @@
 <script lang="ts">
+    import { activateOnKey } from "../lib/a11y";
+    import { startRefresh } from "../lib/refresh";
+    import { usePageLive } from "../lib/pageLive";
+    import { componentRefreshTick } from "../lib/liveRefreshStores";
     import { onMount, onDestroy } from "svelte";
     import { autoRefreshEnabled } from "../lib/stores";
-    import { getWorkers, getQueues, getMonitoringHealth, getAlerts, type WorkerListItem, type QueueHealth, type MonitoringHealthResponse } from "../lib/api";
+    import { getWorkers, getQueues, getMonitoringHealth, getAlerts, getComponents, type WorkerListItem, type QueueHealth, type MonitoringHealthResponse, type ComponentsResponse } from "../lib/api";
+    import { healthClass, dependencyClass, revisionLabel, mixedRevisions, derivedToRows, mergeComponentRows } from "../lib/componentView";
     import { deriveState, errorMessage } from "../lib/dataState";
+    import { DEGRADED_HEARTBEAT_SECONDS, OFFLINE_HEARTBEAT_SECONDS, queueDegraded } from "../lib/thresholds";
+    import { serverHealthToStatus } from "../lib/componentView";
     import { verdictFromAge, verdictFromCount, worstVerdict, staticVerdict, isZeroTimestamp, type ComponentStatus, type Verdict } from "../lib/componentHealth";
     import DataStateBanner from "../lib/DataStateBanner.svelte";
     import JsonTree from "../lib/JsonTree.svelte";
@@ -23,14 +30,14 @@
         evidence: unknown;
     }
 
-    const DEGRADED_HEARTBEAT_SECONDS = 60;
-    const OFFLINE_HEARTBEAT_SECONDS = 300;
-    const DEGRADED_PENDING_THRESHOLD = 20;
+    let report: ComponentsResponse | null = null;
+    $: mixed = mixedRevisions(report?.components);
+
     const FRESH_LAG_SECONDS = 60; // a subsystem newer than this is "healthy"
 
     let components: ComponentRow[] = [];
     let error: unknown = null;
-    let refreshTimer: ReturnType<typeof setInterval>;
+    let stopRefresh: (() => void) | undefined;
     let hasLoadedOnce = false;
     let isFetching = false;
     let expanded: string | null = null;
@@ -43,6 +50,12 @@
     function workerVerdict(w: WorkerListItem): Verdict {
         if (isZeroTimestamp(w.LastHeartbeat)) {
             return { status: "unknown", reason: `${w.WorkerId}: no heartbeat ever recorded` };
+        }
+        // Batch 7: the server's verdict (and its reason) wins; the age thresholds are only the fallback for an older backend.
+        const fromServer = serverHealthToStatus(w.health);
+        if (fromServer) {
+            const status = fromServer === "online" ? "healthy" : fromServer;
+            return { status, reason: w.health_reason || `${w.WorkerId}: ${w.health}` };
         }
         const age = (Date.now() - new Date(w.LastHeartbeat).getTime()) / 1000;
         return verdictFromAge(age, DEGRADED_HEARTBEAT_SECONDS, OFFLINE_HEARTBEAT_SECONDS, `${w.WorkerId} heartbeat`);
@@ -105,7 +118,7 @@
             const offlineWorkers = workerVerdicts.filter((v) => v.status === "offline").length;
             const degradedWorkers = workerVerdicts.filter((v) => v.status === "degraded").length;
 
-            const degradedQueues = queuesRes.queues.filter((q: QueueHealth) => q.PendingCount > DEGRADED_PENDING_THRESHOLD);
+            const degradedQueues = queuesRes.queues.filter((q: QueueHealth) => queueDegraded(q));
 
             const eventIngestion = subsystemVerdict(monRes, "Event Ingestion", "activity");
             const projection = subsystemVerdict(monRes, "Projection", "activity");
@@ -138,6 +151,20 @@
 
             components = rows.map(([name, verdict, evidence]) => ({ name, status: verdict.status, reason: verdict.reason, evidence }));
 
+            // RFC-005 §7: the server-side projection (build revisions, per-instance reasons, dependencies). An older backend has no
+            // /components, so its absence is not an error and the rows above still stand on their own.
+            try {
+                report = await getComponents();
+            } catch {
+                report = null;
+            }
+
+            // RFC-010 §8: when the server judges the non-process components itself, show ITS verdicts (with their lag and threshold) in place of
+            // the ones this page used to work out in the browser. Scheduler and Workers stay as aggregated above.
+            if (report?.derived?.length) {
+                components = mergeComponentRows(components, derivedToRows(report.derived));
+            }
+
             error = null;
         } catch (e) {
             error = e;
@@ -149,12 +176,14 @@
 
     onMount(() => {
         load();
-        refreshTimer = setInterval(() => {
-            if ($autoRefreshEnabled) load();
-        }, 10000);
+        stopRefresh = startRefresh(load, { ticks: [componentRefreshTick], gaugeEveryMs: 10000 });
     });
 
-    onDestroy(() => clearInterval(refreshTimer));
+    // RFC-009 §17: component health changes arrive as component.* events (RFC-010 §8/§9); the 10s timer in lib/refresh.ts covers the
+    // heartbeat ages, which change without any event.
+    usePageLive({ scope: "components", prefixes: ["component."], tick: componentRefreshTick });
+
+    onDestroy(() => stopRefresh?.());
 
     $: state = deriveState({ hasLoadedOnce, isFetching, error, isEmpty: false });
 
@@ -177,7 +206,7 @@
 
     <div class="component-list">
         {#each components as c (c.name)}
-            <div class="component-row" on:click={() => toggleExpanded(c.name)} role="button" tabindex="0" on:keydown={(e) => e.key === "Enter" && toggleExpanded(c.name)}>
+            <div class="component-row" on:click={() => toggleExpanded(c.name)} role="button" tabindex="0" on:keydown={(e) => activateOnKey(e, () => toggleExpanded(c.name))}>
                 <span class="badge" class:healthy={c.status === "healthy"} class:degraded={c.status === "degraded"} class:unhealthy={c.status === "unhealthy"} class:offline={c.status === "offline"} class:unknown={c.status === "unknown"} class:not-built={c.status === "not-built"}>
                     {c.status}
                 </span>
@@ -193,11 +222,64 @@
             {/if}
         {/each}
     </div>
+
+    {#if report}
+        <h3 class="section-title">Instances <small>(from the server's component health projection)</small></h3>
+        {#if mixed.length > 1}
+            <p class="mixed-warning">⚠ Instances are running {mixed.length} different builds: {mixed.join(", ")}. A deploy may not have reached everything.</p>
+        {/if}
+        {#if report.components.length === 0}
+            <p class="empty-note">No component instances have registered yet.</p>
+        {:else}
+            <div class="instance-table">
+                <div class="instance-row header">
+                    <span>Type</span><span>Instance</span><span>Build</span><span>Started</span><span>Last heartbeat</span><span>Health</span>
+                </div>
+                {#each report.components as i (i.component_instance_id)}
+                    <div class="instance-row">
+                        <span>{i.component_type}</span>
+                        <span class="mono" title={i.component_instance_id}>{i.display_name}</span>
+                        <span class="mono">{revisionLabel(i.build_revision)}</span>
+                        <span>{new Date(i.started_at).toLocaleString()}</span>
+                        <span>{i.last_heartbeat ? new Date(i.last_heartbeat).toLocaleTimeString() : "never"}</span>
+                        <span class="health {healthClass(i.health)}" title={i.reason}>{i.health}</span>
+                    </div>
+                {/each}
+            </div>
+        {/if}
+
+        <h3 class="section-title">Dependencies <small>(as observed by the API, build {revisionLabel(report.observed_by.build_revision)})</small></h3>
+        <div class="instance-table">
+            {#each report.dependencies as d (d.name)}
+                <div class="dep-row">
+                    <span class="dep {dependencyClass(d.status)}">{d.status}</span>
+                    <span class="mono">{d.name}</span>
+                    <span class="reason-line">{d.detail}</span>
+                </div>
+            {/each}
+        </div>
+    {/if}
 {:else}
     <DataStateBanner {state} message={errorMessage(error)} />
 {/if}
 
 <style>
+    .section-title { margin-top: 28px; }
+    .section-title small { font-weight: normal; color: #888; font-size: 12px; }
+    .mixed-warning { margin: 8px 0; padding: 8px 12px; background: #fef3c7; color: #92400e; border-radius: 6px; font-size: 12px; }
+    .empty-note { color: #888; font-size: 13px; }
+    .instance-table { border: 1px solid #ddd; border-radius: 8px; overflow-x: auto; }
+    .instance-row { display: grid; grid-template-columns: 0.8fr 1.4fr 1fr 1.4fr 1fr 0.9fr; gap: 12px; padding: 8px 16px; border-top: 1px solid #eee; font-size: 13px; align-items: center; }
+    .instance-row.header { font-weight: bold; background: #f5f5f5; border-top: none; }
+    .dep-row { display: grid; grid-template-columns: 110px 1fr 2fr; gap: 12px; padding: 8px 16px; border-top: 1px solid #eee; font-size: 13px; align-items: center; }
+    .dep-row:first-child { border-top: none; }
+    .mono { font-family: monospace; }
+    .health, .dep { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: bold; width: fit-content; background: #eee; }
+    .health.healthy, .dep.ok { background: #dcfce7; color: #166534; }
+    .health.degraded { background: #fef3c7; color: #92400e; }
+    .health.offline, .dep.unavailable { background: #fee2e2; color: #991b1b; }
+    .health.unknown, .dep.unknown { background: #ede9fe; color: #5b21b6; }
+
     .summary-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 16px; margin-bottom: 20px; }
     .summary-card { padding: 16px; border: 1px solid #ddd; border-radius: 8px; text-align: center; }
     .summary-card strong { display: block; font-size: 28px; }

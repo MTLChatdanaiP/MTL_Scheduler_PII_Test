@@ -1,4 +1,9 @@
 <script lang="ts">
+    import SortControl from "./SortControl.svelte";
+    import Interpretation from "./Interpretation.svelte";
+    import { parseSort, sortBy } from "./sortView";
+    import { activateOnKey } from "./a11y";
+    import { startRefresh } from "./refresh";
     import { onMount, onDestroy } from "svelte";
     import { autoRefreshEnabled } from "../lib/stores";
     import { getQueues, getQueueDetail, getAlerts, type QueueHealth, type QueueDetailResponse } from "../lib/api";
@@ -8,17 +13,18 @@
     import DataStateBanner from "../lib/DataStateBanner.svelte";
     import { queueRefreshTick } from "../lib/liveRefreshStores";
     import { currentPath, parsePath, updateParams } from "../lib/router";
+    import { formatThroughput } from "../lib/componentView";
  
     let hasLoadedOnce = false;
     let isFetching = false;
     let error: unknown = null;
 
-    const DEGRADED_PENDING_THRESHOLD = 20;
+    import { queueDegraded } from "./thresholds";
 
     let queues: QueueHealth[] = [];
     let trends: Record<string, "up" | "down" | "flat" | null> = {};
     let alertCounts: Record<string, number> = {};
-    let refreshTimer: ReturnType<typeof setInterval>;
+    let stopRefresh: (() => void) | undefined;
 
     let expandedQueue: string | null = null;
     let detail: QueueDetailResponse | null = null;
@@ -56,6 +62,17 @@
         if (statusFilter && (isDegraded(q) ? "degraded" : "healthy") !== statusFilter) return false;
         if (zeroConsumersOnly && q.ConsumerCount !== 0) return false;
         return true;
+    });
+
+    // Batch 7: ?sort= (client-side -- same reasoning as the filters above).
+    const QUEUE_SORTS = [
+        { key: "name", label: "Queue" }, { key: "pending", label: "Pending" }, { key: "length", label: "Stream length" },
+        { key: "oldest", label: "Oldest pending age" }, { key: "consumers", label: "Consumers" },
+    ];
+    $: queueSort = parseSort(parsePath($currentPath).params.get("sort"), QUEUE_SORTS.map((o) => o.key));
+    $: sortedQueues = sortBy(visibleQueues, queueSort, {
+        name: (q) => q.QueueName, pending: (q) => q.PendingCount, length: (q) => q.StreamLength,
+        oldest: (q) => q.OldestPendingAgeSeconds, consumers: (q) => q.ConsumerCount,
     });
 
     async function computeTrend(queueName: string) {
@@ -124,14 +141,12 @@
         });
 
         loadQueues();
-        refreshTimer = setInterval(() => {
-            if ($autoRefreshEnabled) loadQueues();
-        }, 10000);
+        stopRefresh = startRefresh(loadQueues, { gaugeEveryMs: 10000 });
     });
 
     onDestroy(() => {
         unsubscribePath?.();
-        clearInterval(refreshTimer);
+        stopRefresh?.();
     });
 
     async function toggleExpanded(queueName: string) {
@@ -154,7 +169,7 @@
     }
 
     function isDegraded(q: QueueHealth): boolean {
-        return q.PendingCount > DEGRADED_PENDING_THRESHOLD;
+        return queueDegraded(q);
     }
 
     function trendArrow(t: "up" | "down" | "flat" | null | undefined): string {
@@ -189,6 +204,8 @@
     </label>
 </div>
 
+<div class="filter-bar"><SortControl options={QUEUE_SORTS} /></div>
+
 <div class="queue-table">
     <div class="queue-row header">
         <span>Queue</span>
@@ -208,23 +225,23 @@
         <p class="status error">{error}</p>
     {:else}
         {#if state === "READY" || state === "REFRESHING"}
-            {#each visibleQueues as q (q.QueueName)}
+            {#each sortedQueues as q (q.QueueName)}
                 <div
                     class="queue-row clickable"
                     on:click={() => toggleExpanded(q.QueueName)}
                     role="button"
                     tabindex="0"
-                    on:keydown={(e) => e.key === "Enter" && toggleExpanded(q.QueueName)}
+                    on:keydown={(e) => activateOnKey(e, () => toggleExpanded(q.QueueName))}
                 >
                     <span class="queue-name">{q.QueueName}</span>
                     <span class="badge" class:degraded={isDegraded(q)}>
                         {isDegraded(q) ? "Degraded" : "Healthy"}
-                    </span>
+                    </span><Interpretation basis={q.health_reason ?? "pending count against the backlog threshold"} />
                     <span>{q.StreamLength}</span>
                     <span>{q.PendingCount}</span>
                     <span>{q.OldestPendingAgeSeconds}s</span>
                     <span class:zero-consumers={q.ConsumerCount === 0}>{q.ConsumerCount}</span>
-                    <span class="gap">—</span>
+                    <span title="Runs that finished (completed or failed) per minute over the last five minutes">{formatThroughput(q.ThroughputPerMinute)}</span>
                     <span class="gap">—</span>
                     <span>{trendArrow(trends[q.QueueName])}</span>
                     <span>{samplingAge(q.SampledAt)}</span>

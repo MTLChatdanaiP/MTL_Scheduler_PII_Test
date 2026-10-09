@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { startRefresh } from "./refresh";
     import { onMount, onDestroy } from "svelte";
     import { autoRefreshEnabled } from "../lib/stores";
     import { getQueues, type QueueHealth } from "../lib/api";
@@ -13,13 +14,13 @@
     // Matches the QUEUE_BACKLOG alert rule's own threshold (rules.json,
     // queue.pending_count > 20) so this card and the real alert never
     // disagree about what "degraded" means.
-    const DEGRADED_PENDING_THRESHOLD = 20;
+    import { queueDegraded } from "./thresholds";
 
     let queues: QueueHealth[] = [];
-    let refreshTimer: ReturnType<typeof setInterval>;
+    let stopRefresh: (() => void) | undefined;
 
     function isDegraded(q: QueueHealth): boolean {
-        return q.PendingCount > DEGRADED_PENDING_THRESHOLD;
+        return queueDegraded(q);
     }
 
     async function loadQueues() {
@@ -38,13 +39,11 @@
 
     onMount(() => {
         loadQueues();
-        refreshTimer = setInterval(() => {
-            if ($autoRefreshEnabled) loadQueues();
-        }, 10000);
+        stopRefresh = startRefresh(loadQueues, { gaugeEveryMs: 10000 });
     });
 
     onDestroy(() => {
-        clearInterval(refreshTimer);
+        stopRefresh?.();
     });
 
     $: degradedCount = queues.filter(isDegraded).length;

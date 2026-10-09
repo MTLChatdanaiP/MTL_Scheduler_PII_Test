@@ -58,4 +58,15 @@ type MaskConfig struct {
 	VisibleCharacters int    `json:"visibleCharacters"`
 	MaskCharacter     string `json:"maskCharacter"`
 	DomainMode        string `json:"domainMode"`
+
+	// RFC-006 §13: how many characters of the part before the "@" stay visible
+	// for the EMAIL strategy. Falls back to VisibleCharacters when unset.
+	//
+	// omitempty is REQUIRED here, not cosmetic. LoadPolicy computes the policy
+	// checksum as sha256(json.Marshal(policy.Spec)), so adding a field WITHOUT
+	// omitempty would make every existing policy marshal differently, fail its
+	// checksum, and refuse to load. With omitempty a zero value is omitted and
+	// every existing policy keeps byte-identical output. It must also stay the
+	// LAST field so the order of the existing fields is untouched.
+	LocalVisiblePrefix int `json:"localVisiblePrefix,omitempty"`
 }

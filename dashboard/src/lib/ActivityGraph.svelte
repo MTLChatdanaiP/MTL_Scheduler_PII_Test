@@ -25,8 +25,11 @@
 
     const COLORS: Record<Category, string> = {
         task: "#3b82f6",
+        attempt: "#8b5cf6",
+        schedule: "#f59e0b",
         alert: "#ef4444",
         pii: "#22c55e",
+        system: "#64748b",
         other: "#9ca3af",
     };
 

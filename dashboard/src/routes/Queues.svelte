@@ -10,7 +10,9 @@
     onMount(() => {
         stopLiveRefresh = startLiveRefreshTrigger({
             prefixes: ["queue."],
+            scopes: ["queues"], // RFC-010 §15
             onMatch: () => queueRefreshTick.update((n) => n + 1),
+            fallback: {}, // RFC-010 §27
         });
     });
 
@@ -18,4 +20,4 @@
 </script>
 
 <QueueHealthCards />
-<QueueList />
+<QueueList />

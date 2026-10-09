@@ -48,7 +48,7 @@ func main() {
 		&models.Worker{}, &models.WorkerHeartbeat{}, &models.QueueHealth{},
 		&models.Attempt{}, &models.ExecutionChain{}, &models.ScheduleDefinition{},
 		&models.MonitoringAnnotation{}, &models.MonitoringHealth{}, &models.PIIVault{}, &models.PolicyActivation{},
-		&models.Alert{}, &models.Notification{}, &models.ExecutionArtifact{},
+		&models.Alert{}, &models.Notification{}, &models.ExecutionArtifact{}, &models.AuditRecord{}, &models.ScheduleSnapshot{},
 	)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

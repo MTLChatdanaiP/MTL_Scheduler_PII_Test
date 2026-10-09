@@ -88,6 +88,12 @@ export function getTelemetrySnapshot() {
     };
 }
 
+// Batch 7 (RFC-009 §23): the snapshot as text an operator can paste into a ticket. Telemetry stays in the browser (decision Q2); this is
+// the only way it leaves, and only when a person copies it. Endpoints are already patterns (/runs/:id), never raw ids.
+export function formatTelemetrySnapshot(snap: ReturnType<typeof getTelemetrySnapshot>, nowIso: string): string {
+    return JSON.stringify({ captured_at: nowIso, source: "dashboard (browser memory, resets on reload)", ...snap }, null, 2);
+}
+
 // Installed once, application-wide, the moment this module is first
 // imported -- an ES module's top-level code runs exactly once no matter how
 // many files import it, so this needs no separate init() call from

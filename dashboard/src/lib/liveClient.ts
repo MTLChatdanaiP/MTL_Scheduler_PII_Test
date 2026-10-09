@@ -1,9 +1,11 @@
 import { apiStream, ApiError, type SnapshotHandoff } from "./api";
 import { createSSEParser } from "./sseParser";
+import { buildLivePath, createStaleGuard, type LiveEnvelopeFields } from "./liveEnvelope";
 
 export type LiveState = "CONNECTING" | "LIVE" | "RECONNECTING" | "RESYNCING" | "FORBIDDEN" | "CLOSED";
 
-export interface LiveEvent {
+// id/type/subject/at are what every server version sends. The RFC-010 §10 envelope fields are optional extras (see LiveEnvelopeFields).
+export interface LiveEvent extends LiveEnvelopeFields {
     id: number;
     type: string;
     subject: string;
@@ -12,6 +14,8 @@ export interface LiveEvent {
 
 export interface LiveOptions {
     path: string; // "/live/activity" or "/live/alerts"
+    // RFC-010 §15: what to subscribe to, e.g. ["workers"] or ["queue:orders", "platform.summary"]. Omitted = everything the key may see.
+    scopes?: string[];
     onEvent: (event: LiveEvent) => void;
     onState: (state: LiveState) => void; // fires only when the state CHANGES
     // Fires on every chunk received from the server, INCLUDING keepalive pings.
@@ -45,6 +49,7 @@ export function connectLive(handoff: SnapshotHandoff, opts: LiveOptions): () => 
     let resyncPending = false;
     let lastEmitted: LiveState | null = null;
     const seen = new Set<number>();
+    const stale = createStaleGuard(); // RFC-010 §10: reject an update older than what we already applied for the same resource
 
     // Only report real changes, so callers never see the same state twice in a row.
     function emit(state: LiveState) {
@@ -77,7 +82,7 @@ export function connectLive(handoff: SnapshotHandoff, opts: LiveOptions): () => 
             try {
                 arm();
                 const after = Math.max(0, cursor - RESUME_OVERLAP);
-                const res = await apiStream(`${opts.path}?after=${after}`, conn.signal);
+                const res = await apiStream(buildLivePath(opts.path, after, opts.scopes), conn.signal);
                 const reader = res.body!.getReader();
                 const decoder = new TextDecoder();
                 const parser = createSSEParser();
@@ -100,12 +105,14 @@ export function connectLive(handoff: SnapshotHandoff, opts: LiveOptions): () => 
                             const fresh = await opts.onResync();
                             cursor = fresh.watermark;
                             seen.clear();
+                            stale.reset();
                             resynced = true;
                             break;
                         }
                         const e = JSON.parse(msg.data) as LiveEvent;
                         if (!isNew(e.id)) continue;
                         if (e.id > cursor) cursor = e.id;
+                        if (!stale.accept(e)) continue;
                         opts.onEvent(e);
                     }
                     if (resynced) break;
@@ -137,4 +144,4 @@ export function connectLive(handoff: SnapshotHandoff, opts: LiveOptions): () => 
         lifetime.abort();
         emit("CLOSED");
     };
-}
+}

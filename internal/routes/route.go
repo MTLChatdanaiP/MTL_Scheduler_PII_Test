@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"MTL_Scheduler_PII_Test/internal/auth"
+	"MTL_Scheduler_PII_Test/internal/config"
 	"MTL_Scheduler_PII_Test/internal/handlers"
 )
 
@@ -44,7 +45,7 @@ func SetupRouter(ctx context.Context) *gin.Engine {
 	r.POST("/tasks", auth.RequireScope("job.write"), handlers.CreateTask) // PRD §10.1
 	r.GET("/runs", auth.RequireScope("job.read"), handlers.GetTask)       // RFC-008 §5.2, §13
 	r.GET("/runs/:run_id", auth.RequireScope("job.read"), handlers.GetTaskDetail)
-	r.POST("/runs/:job_id/rerun", auth.RequireScope("job.read"), handlers.RerunTaskPost)
+	r.POST("/runs/:job_id/rerun", auth.RequireScope("job.write"), handlers.RerunTaskPost) // creates a task, so it needs the same scope as POST /tasks
 
 	// --- Worker ---
 	r.GET("/workers", auth.RequireScope("job.read"), handlers.GetWorkers)
@@ -78,10 +79,11 @@ func SetupRouter(ctx context.Context) *gin.Engine {
 	r.GET("/execution-chains/:execution_chain_id", auth.RequireScope("job.read"), handlers.GetRunChain) // RFC-008 §13
 	r.GET("/metrics", auth.RequireScope("job.read"), handlers.GetSystemMetrics)
 	r.GET("/monitoring/health", auth.RequireScope("job.read"), handlers.GetMonitoringHealth) // RFC-008 §5.1
+	r.GET("/components", auth.RequireScope("job.read"), handlers.GetComponents)              // RFC-005 §7 Component Health Projection
 	r.GET("/overview", auth.RequireScope("job.read"), handlers.GetOverview)
 
 	// --- Scheduling ---
-	r.PATCH("/schedules/:schedule_id/toggle", auth.RequireScope("job.read"), handlers.ToggleSchedule)
+	r.PATCH("/schedules/:schedule_id/toggle", auth.RequireScope("job.write"), handlers.ToggleSchedule) // changes what runs, so it is a write
 
 	// --- Alerts ---
 	r.GET("/alerts", auth.RequireScope("alerts.read"), handlers.GetAlerts)                                          // RFC-007 §13, RFC-008 §13
@@ -91,7 +93,10 @@ func SetupRouter(ctx context.Context) *gin.Engine {
 	r.GET("/live/activity", auth.RequireScope("job.read"), handlers.GetLive(ctx))
 
 	// --- Debug ---
-	r.DELETE("/debug/reset", handlers.NUKE_THE_FUCKER)
+	// Destroys data, so it does not exist unless ENABLE_DEBUG_ENDPOINTS=true, and even then it needs its own scope.
+	if config.DebugEndpointsEnabled() {
+		r.DELETE("/debug/reset", auth.RequireScope("debug.reset"), handlers.ResetAllData)
+	}
 
 	return r
 }

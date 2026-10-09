@@ -127,4 +127,30 @@
     .content {
         padding: 20px;
     }
+
+    /* Batch 7 (RFC-009 §22): on a narrow screen the sidebar becomes a strip above the page instead of taking 220px from it. */
+    @media (max-width: 900px) {
+        .dashboard {
+            flex-direction: column;
+        }
+        .sidebar {
+            width: auto;
+            border-right: none;
+            border-bottom: 1px solid #ddd;
+            padding: 12px 16px;
+        }
+        .sidebar h1 {
+            margin-bottom: 12px;
+        }
+        nav {
+            flex-direction: row;
+            flex-wrap: wrap;
+        }
+        main {
+            min-width: 0;
+        }
+        .content {
+            padding: 12px 16px;
+        }
+    }
 </style>

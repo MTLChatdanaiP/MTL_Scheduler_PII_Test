@@ -60,13 +60,14 @@ func LoadPolicy(path string) (models.PIIPolicy, error) {
 	return policy, nil
 }
 
-func EvaluatePolicy(findings []Finding, policy models.PIIPolicy, source string, jobType string) []EvaluatedFinding {
+func EvaluatePolicy(findings []Finding, policy models.PIIPolicy, source string, jobType string, queue string) []EvaluatedFinding {
 	evaluated := []EvaluatedFinding{}
 
 	for _, finding := range findings {
 		ctx := MatchContext{
 			Source:     source,
 			JobType:    jobType,
+			Queue:      queue,
 			PIIType:    string(finding.Type),
 			DetectorID: finding.DetectorID,
 			Confidence: 1.0, // TODO: does Finding carry a real confidence value anywhere yet, or is this still always 1.0?
@@ -78,11 +79,28 @@ func EvaluatePolicy(findings []Finding, policy models.PIIPolicy, source string, 
 	return evaluated
 }
 
+// ActivatePolicy is ActivatePolicyAs with the actor defaulted to the source, so
+// startup (source "system") and every existing caller keep working unchanged.
 func ActivatePolicy(ctx context.Context, path string, trigger string, source string) (models.PIIPolicy, error) {
+	return ActivatePolicyAs(ctx, path, trigger, source, source)
+}
+
+// ActivatePolicyAs loads and activates a policy file, recording who asked.
+//
+// RFC-006 §33 wants every policy mutation audited with actor, revision, checksum
+// and result. A failed activation now records the trigger and actor as well, which
+// it did not before, so "who tried to reload a broken policy" is answerable.
+func ActivatePolicyAs(ctx context.Context, path string, trigger string, source string, actor string) (models.PIIPolicy, error) {
+	if actor == "" {
+		actor = source
+	}
+
 	policy, err := LoadPolicy(path)
 
 	activation := models.PolicyActivation{
 		ActivatedAt: time.Now().UTC(),
+		Trigger:     trigger,
+		Actor:       actor,
 	}
 
 	if err != nil {
@@ -97,7 +115,6 @@ func ActivatePolicy(ctx context.Context, path string, trigger string, source str
 	activation.PolicyVersion = policy.Metadata.Version
 	activation.Checksum = policy.Metadata.Checksum
 	activation.Result = "SUCCESS"
-	activation.Trigger = trigger
 	database.DB.WithContext(ctx).Create(&activation)
 
 	LoadedPolicy.Store(&policy)

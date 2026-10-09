@@ -29,6 +29,17 @@ func TestMain(m *testing.M) {
 		// is missing here does not fail to compile -- the table simply is not
 		// created, and the write fails at runtime with "relation does not exist".
 		&models.PIIVault{}, &models.PolicyActivation{}, &models.Alert{},
+		// RFC-006 §24: ScanAndPersistArtifact writes here on every task
+		// success/failure -- missing this causes the exact same class of
+		// runtime failure the comment above already warns about for the other
+		// models in this list.
+		&models.ExecutionArtifact{},
+		// RFC-002 §11: the scheduler's record of what it last announced about each schedule.
+		&models.ScheduleSnapshot{},
+		// RFC-006 §33: the vault-read audit table (main.go already migrates it; the tests use it for retention).
+		&models.AuditRecord{},
+		// RFC-005 §7 / RFC-002 §14: the occurrence ledger and the schedule projection.
+		&models.ScheduleOccurrence{}, &models.ScheduleProjection{},
 	)
 
 	// WITHOUT THIS, TestScheduler_FiresRecurringSchedule PANICS.
@@ -65,7 +76,7 @@ func TestRunHandler(t *testing.T) {
 			task := models.Task{TaskType: tt.taskType}
 
 			start := time.Now()
-			got, _ := runHandler(context.Background(), task)
+			got, _, _ := runHandler(context.Background(), task)
 			elapsed := time.Since(start)
 
 			if got != tt.want {
@@ -96,7 +107,7 @@ func TestRunHandler_SuccessPath(t *testing.T) {
 			task := models.Task{TaskType: tt.taskType}
 
 			start := time.Now()
-			got, _ := runHandler(context.Background(), task)
+			got, _, _ := runHandler(context.Background(), task)
 			elapsed := time.Since(start)
 
 			if got != tt.want {

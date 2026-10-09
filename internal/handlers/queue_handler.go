@@ -14,6 +14,18 @@ import (
 	"gorm.io/gorm"
 )
 
+// QueueItem is one queue sample plus the server's verdict on it (RFC-009 §25: the dashboard shows this, it does not work it out).
+type QueueItem struct {
+	models.QueueHealth
+	Health       string `json:"health"`        // HEALTHY | DEGRADED
+	HealthReason string `json:"health_reason"` // the numbers behind it
+}
+
+func withVerdict(q models.QueueHealth) QueueItem {
+	health, reason := models.QueueVerdict(q)
+	return QueueItem{QueueHealth: q, Health: health, HealthReason: reason}
+}
+
 func GetQueues(c *gin.Context) {
 	var queues []models.QueueHealth
 
@@ -33,10 +45,10 @@ func GetQueues(c *gin.Context) {
 		}
 	}
 
-	result := make([]models.QueueHealth, 0, len(latest))
+	result := make([]QueueItem, 0, len(latest))
 
 	for _, queue := range latest {
-		result = append(result, queue)
+		result = append(result, withVerdict(queue))
 	}
 
 	var newestLastSample time.Time  // newestLastEvent  time.Time
@@ -91,7 +103,7 @@ func GetQueue(c *gin.Context) {
 	watermark, _ := freshness.CurrentWatermark(c.Request.Context())
 
 	c.JSON(http.StatusOK, gin.H{
-		"current":   latest,
+		"current":   withVerdict(latest),
 		"history":   history,
 		"freshness": freshnessInfo,
 		"live":      freshness.LiveInfo{Watermark: watermark},

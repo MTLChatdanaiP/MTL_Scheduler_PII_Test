@@ -3,7 +3,7 @@
     import { autoRefreshEnabled } from "../lib/stores";
     import { fetchSnapshotForLiveHandoff, ApiError } from "../lib/api";
     import { connectLive, type LiveEvent, type LiveState } from "../lib/liveClient";
-    import { CATEGORIES, categoryOf, filterEvents, countByCategory, connectionBadge, gapStart,type Category } from "../lib/activity";
+    import { CATEGORIES, categoryOf, filterEvents, countByCategory, connectionBadge, gapStart, allVisible, showFromHidden, hiddenFromShow, type Category } from "../lib/activity";
     import ActivityGraph from "../lib/ActivityGraph.svelte";
     import DataStateBanner from "../lib/DataStateBanner.svelte";
     import { currentPath, parsePath, updateParams } from "../lib/router";
@@ -38,7 +38,7 @@
     // Which view is showing. Filters and the live connection are shared by both.
     let view: "list" | "graph" = "list";
 
-    let show: Record<Category, boolean> = { task: true, alert: true, pii: true, other: true };
+    let show: Record<Category, boolean> = allVisible();
     let subject = "";
 
     // Encode which categories are HIDDEN, not which are shown: an absent
@@ -48,13 +48,7 @@
     function syncFiltersFromUrl() {
         if (!syncUrl) return;
         const { params } = parsePath($currentPath);
-        const hidden = new Set((params.get("hidden") ?? "").split(",").filter(Boolean));
-        show = {
-            task: !hidden.has("task"),
-            alert: !hidden.has("alert"),
-            pii: !hidden.has("pii"),
-            other: !hidden.has("other"),
-        };
+        show = showFromHidden(params.get("hidden"));
         subject = params.get("subject") ?? "";
         view = params.get("view") === "graph" ? "graph" : "list";
     }
@@ -62,7 +56,7 @@
     function commitUrl() {
         if (!syncUrl) return;
         updateParams({
-            hidden: CATEGORIES.filter((c) => !show[c]).join(","),
+            hidden: hiddenFromShow(show),
             subject,
             view: view === "graph" ? "graph" : "", // "list" is the default -- omit it, keep the URL clean
         });
@@ -153,7 +147,7 @@
     $: anyFilter = subject.trim() !== "" || CATEGORIES.some((c) => !show[c]);
 
     function clearFilters() {
-        show = { task: true, alert: true, pii: true, other: true };
+        show = allVisible();
         subject = "";
         commitUrl();
     }
@@ -258,8 +252,11 @@
     .chip { font-size: 11px; font-weight: bold; padding: 3px 10px; border-radius: 999px; border: 1px solid transparent; cursor: pointer; background: #eee; color: #555; }
     .chip .n { font-weight: normal; opacity: 0.75; margin-left: 2px; }
     .chip.task { background: #dbeafe; color: #1e40af; }
+    .chip.attempt { background: #ede9fe; color: #5b21b6; }
+    .chip.schedule { background: #fef3c7; color: #92400e; }
     .chip.alert { background: #fee2e2; color: #991b1b; }
     .chip.pii { background: #dcfce7; color: #166534; }
+    .chip.system { background: #e2e8f0; color: #334155; }
     .chip.off { opacity: 0.45; text-decoration: line-through; }
     .filters input { padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px; min-width: 200px; }
     .clear { font-size: 11px; padding: 3px 10px; border: 1px solid #ccc; border-radius: 4px; background: white; cursor: pointer; }
@@ -273,6 +270,9 @@
 
     .type { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: bold; background: #eee; }
     .type.task { background: #dbeafe; color: #1e40af; }
+    .type.attempt { background: #ede9fe; color: #5b21b6; }
+    .type.schedule { background: #fef3c7; color: #92400e; }
     .type.alert { background: #fee2e2; color: #991b1b; }
     .type.pii { background: #dcfce7; color: #166534; }
+    .type.system { background: #e2e8f0; color: #334155; }
 </style>

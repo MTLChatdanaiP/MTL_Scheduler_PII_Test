@@ -22,4 +22,19 @@ type RunProjection struct {
 	// RFC-003 §12 Reclaim Semantics: "Reclaiming must not automatically mean the previous attempt failed... Monitoring may observe... delivery reclaimed and flag a consistency/anomaly condition."
 	WasReclaimed bool      `json:"was_reclaimed"`
 	LastEventAt  time.Time `json:"last_event_at"`
+
+	// RFC-005 §7 Run Projection: "latest attempt, attempt count, ... active monitoring annotations, ... alert
+	// summary". All of these are RECOMPUTED from their source tables, never incremented, so they cannot drift and
+	// replaying an event changes nothing.
+	LatestAttemptID       string `json:"latest_attempt_id"`
+	LatestAttemptStatus   string `json:"latest_attempt_status"`
+	LatestWorkerID        string `json:"latest_worker_id"`
+	AttemptCount          int    `json:"attempt_count"`
+	ActiveAnnotationCount int    `json:"active_annotation_count"`
+	OpenAlertCount        int    `json:"open_alert_count"`
+
+	// RFC-005 §2 "identify missing or contradictory signals": set when a SECOND, DIFFERENT terminal status arrives
+	// (completed after failed). The first terminal status is kept.
+	Contradicted      bool   `json:"contradicted"`
+	ContradictionNote string `json:"contradiction_note"`
 }

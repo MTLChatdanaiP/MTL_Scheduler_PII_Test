@@ -47,4 +47,19 @@ type Task struct {
 	ScanStatus string // "NOT_SCANNED" (default), "CLEAN", "DETECTED", "SCAN_ERROR"
 
 	Queue string
+
+	// RFC-003 §5: one id that follows the job from creation through Redis to the
+	// worker's logs, shared by every retry of the same chain. A caller may supply one
+	// (it is validated), otherwise it is generated.
+	TraceID string
+
+	// RFC-003 §1: set once the task has been CONFIRMED published to Redis. A task that
+	// is Queued with this still empty was marked Queued but never published (Redis was
+	// down, or the process died in between) and is republished by the recovery sweep.
+	// Server-owned: CreateTask_Direct clears whatever a caller sends.
+	PublishedAt *time.Time
+
+	// RFC-002 §11: which occurrence of its schedule produced this run ("<schedule_id>:<expected unix
+	// time>"). Empty for a task that did not come from a schedule. Copied onto every event of the run.
+	ScheduleOccurrenceId string
 }

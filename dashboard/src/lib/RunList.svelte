@@ -1,8 +1,14 @@
 <script lang="ts">
+    import { activateOnKey } from "./a11y";
+    import Interpretation from "./Interpretation.svelte";
+    import { startRefresh } from "./refresh";
+    import { runRefreshTick } from "./liveRefreshStores";
     import { onMount, onDestroy } from "svelte";
     import { autoRefreshEnabled, timeRange, globalSearchQuery, activeFilterCount } from "../lib/stores";
+    import { latestOnly, isAbort } from "./latestOnly";
     import { getRuns, getRunDetail, type RunListItem, type RunDetailResponse } from "../lib/api";
     import { deriveState, errorMessage } from "../lib/dataState";
+    import { statusOf, statusClass, statusLabel, statusDisagrees } from "../lib/status";
     import DataStateBanner from "../lib/DataStateBanner.svelte";
     import { currentPath, parsePath, updateParams } from "../lib/router";
     import JsonTree from "../lib/JsonTree.svelte";
@@ -10,7 +16,7 @@
 
     let rows: RunListItem[] = [];
     let error: unknown = null;
-    let refreshTimer: ReturnType<typeof setInterval>;
+    let stopRefresh: (() => void) | undefined;
     let ready = false;
     let hasLoadedOnce = false;
     let isFetching = false;
@@ -90,7 +96,10 @@
         return ms ? new Date(now.getTime() - ms) : null;
     }
 
+    const latest = latestOnly();
+
     async function loadRuns() {
+        const req = latest.start();
         isFetching = true;
         loadError = null;
         commitFilters();
@@ -118,15 +127,19 @@
 
             params.set("limit", "25");
 
-            const res = await getRuns(`?${params.toString()}`);
+            const res = await getRuns(`?${params.toString()}`, req.signal);
+            if (!req.isCurrent()) return; // a newer search has started; this answer is stale
             rows = res.runs;
             error = null;
         } catch (e) {
+            if (isAbort(e) || !req.isCurrent()) return;
             error = e;
             loadError = errorMessage(e);
         } finally {
-            isFetching = false;
-            hasLoadedOnce = true;
+            if (req.isCurrent()) {
+                isFetching = false;
+                hasLoadedOnce = true;
+            }
         }
     }
 
@@ -143,14 +156,12 @@
         ready = true;
         loadRuns();
 
-        refreshTimer = setInterval(() => {
-            if ($autoRefreshEnabled) loadRuns();
-        }, 10000);
+        stopRefresh = startRefresh(loadRuns, { ticks: [runRefreshTick], gaugeEveryMs: 30000 });
     });
 
     onDestroy(() => {
         unsubscribePath?.();
-        clearInterval(refreshTimer);
+        stopRefresh?.();
     });
 
     $: if (ready && $timeRange) {
@@ -271,9 +282,11 @@
         <select bind:value={executionStateFilter} on:change={loadRuns}>
             <option value="">All</option>
             <option value="Pending">Pending</option>
+            <option value="Queued">Queued</option>
             <option value="Running">Running</option>
             <option value="Completed">Completed</option>
             <option value="Failed">Failed</option>
+            <option value="Blocked">Blocked</option>
         </select>
     </label>
     <label>Queue:<input type="text" bind:value={queueFilter} on:change={loadRuns} placeholder="e.g. tasks:stream" /></label>
@@ -333,7 +346,7 @@
         </div>
 
         {#each rows as row (row.JobId)}
-            <div class="run-row clickable" on:click={() => toggleExpanded(row)} role="button" tabindex="0" on:keydown={(e) => e.key === "Enter" && toggleExpanded(row)}>
+            <div class="run-row clickable" on:click={() => toggleExpanded(row)} role="button" tabindex="0" on:keydown={(e) => activateOnKey(e, () => toggleExpanded(row))}>
                 <span class="run-id-cell">
                     <span
                         class="copyable"
@@ -355,8 +368,8 @@
                 <span>{row.RetryIndex}</span>
                 <span>{row.TaskType}</span>
                 <span>{row.Queue || "—"}</span>
-                <span class="badge" class:failed={row.current_status === "Failed"} class:running={row.current_status === "Running"}>
-                    {row.current_status || row.Status}
+                <span class="badge {statusClass(statusOf(row))}" title={statusDisagrees(row) ? `The run projection says "${row.current_status}"; this is the task's own status.` : ""}>
+                    {statusLabel(statusOf(row))}{#if statusDisagrees(row)} ⚠{/if}
                 </span>
                 <span class="badge" class:attention={monitoringHealth(row) === "Attention"}>{monitoringHealth(row)}</span>
                 <span>{row.AttemptCount}</span>
@@ -390,9 +403,10 @@
                         <p class="detail-error">{detailError}</p>
                     {:else if runDetail}
                         {@const transition = latestKnownTransition(runDetail.run)}
+                        {@const traceId = runDetail.run.TraceID ?? ""}
                         <div class="first-viewport">
                             <div class="viewport-item"><span class="viewport-label">Execution state</span>
-                                <span class="badge" class:failed={runDetail.run.current_status === "Failed"}>{runDetail.run.current_status || runDetail.run.Status}</span>
+                                <span class="badge {statusClass(statusOf(runDetail.run))}">{statusLabel(statusOf(runDetail.run))}</span>
                             </div>
                             <div class="viewport-item"><span class="viewport-label">Abnormal condition?</span>
                                 <span class="badge" class:attention={monitoringHealth(runDetail.run) === "Attention"}>{monitoringHealth(runDetail.run)}</span>
@@ -409,6 +423,33 @@
                             <div class="viewport-item"><span class="viewport-label">Payload size</span>
                                 <span>{runDetail.payload_size_bytes.toLocaleString()} bytes</span>
                             </div>
+                        </div>
+
+                        {#if runDetail.run.contradicted}
+                            <p class="contradiction">⚠ Contradictory signals: {runDetail.run.contradiction_note || "two different final states were recorded"}. The first one is kept.</p>
+                        {/if}
+                        {#if statusDisagrees(runDetail.run)}
+                            <p class="contradiction">⚠ The run projection says "{runDetail.run.current_status}" but the task is {runDetail.run.Status}. Run <code>go run ./cmd/rebuildprojections</code> to repair the projection.</p>
+                        {/if}
+
+                        <div class="detail-section correlation">
+                            <h4>Correlation</h4>
+                            <dl>
+                                <dt>Trace id</dt>
+                                <dd>{#if traceId}<span class="copyable" role="button" tabindex="0" title="Click to copy" on:click={(e) => copyId(traceId, e)} on:keydown={(e) => (e.key === "Enter" || e.key === " ") && copyId(traceId, e)}>{traceId}</span>{:else}—{/if}</dd>
+                                <dt>Execution chain</dt>
+                                <dd>{runDetail.run.ExecutionChainId ? shortId(runDetail.run.ExecutionChainId) : "—"}</dd>
+                                <dt>Schedule occurrence</dt>
+                                <dd>{runDetail.run.ScheduleOccurrenceId || "—"}</dd>
+                                <dt>RFC state</dt>
+                                <dd>{runDetail.run.rfc_state || "—"}{#if runDetail.run.rfc_state}<Interpretation basis="the RFC name for the stored status and the newest attempt's failure category" />{/if}</dd>
+                                <dt>Published to Redis</dt>
+                                <dd>{#if runDetail.run.PublishedAt}{new Date(runDetail.run.PublishedAt).toLocaleString()}{:else}—{/if}</dd>
+                                <dt>Attempts</dt>
+                                <dd>{runDetail.run.attempt_count ?? runDetail.run.AttemptCount} · latest worker {runDetail.run.latest_worker_id || runDetail.run.LatestWorker || "—"}</dd>
+                                <dt>Open alerts / annotations</dt>
+                                <dd>{runDetail.run.open_alert_count ?? runDetail.run.active_alert_count ?? 0} / {runDetail.run.active_annotation_count ?? runDetail.run.annotations?.length ?? 0}</dd>
+                            </dl>
                         </div>
 
                         <hr />
@@ -469,6 +510,14 @@
     .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: bold; background: #eee; width: fit-content; }
     .badge.failed { background: #fee2e2; color: #991b1b; }
     .badge.running { background: #dbeafe; color: #1e40af; }
+    .badge.pending { background: #f1f5f9; color: #475569; }
+    .badge.queued { background: #e0f2fe; color: #075985; }
+    .badge.completed { background: #dcfce7; color: #166534; }
+    .badge.blocked { background: #fce7f3; color: #9d174d; }
+    .contradiction { margin: 8px 0; padding: 8px 12px; background: #fef3c7; color: #92400e; border-radius: 6px; font-size: 12px; }
+    .correlation dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; font-size: 12px; }
+    .correlation dt { color: #888; }
+    .correlation dd { margin: 0; }
     .badge.attention { background: #fef3c7; color: #92400e; }
 
     .run-detail { padding: 16px 24px; background: #fafafa; border-top: 1px solid #eee; font-size: 13px; }

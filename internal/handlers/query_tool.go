@@ -14,6 +14,7 @@ import (
 
 type RunListItem struct {
 	models.Task
+	RunProjectionExtras // RFC-005 §7: latest attempt, annotation and alert counts, contradiction flag
 
 	CurrentStatus   string    `json:"current_status"`
 	QueuedAt        time.Time `json:"queued_at"`
@@ -28,6 +29,8 @@ type RunListItem struct {
 	AttemptCount    int
 	LatestWorker    string
 	FailureCategory string
+	// RFC-001 §5 name for this run's state (see models.RFCState); the stored Status is unchanged.
+	RFCState        string `json:"rfc_state"`
 	Duration        time.Duration
 
 	PIIFindings []PIIFindingItem `json:"pii_findings"`
@@ -168,4 +171,13 @@ func applyAlertDerivedFilters(c *gin.Context, query *gorm.DB) *gorm.DB {
 	}
 
 	return query
+}
+
+// setRFCState fills RFCState from the stored status and the newest attempt's failure category (RFC-001 §5).
+func (r *RunListItem) setRFCState() {
+	category := ""
+	if n := len(r.Attempts); n > 0 {
+		category = r.Attempts[n-1].FailureCategory
+	}
+	r.RFCState = models.RFCState(r.Task.Status, category, r.Task.RetryIndex)
 }

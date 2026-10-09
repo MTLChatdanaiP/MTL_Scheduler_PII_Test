@@ -29,17 +29,26 @@ func StartHeartbeat(ctx context.Context, workerId string, instanceId string) {
 
 		value, ok := workerCounters.Load(workerId)
 		if !ok {
+			// no counter yet: wait one interval (and stop on shutdown) instead of spinning on this check at full speed
+			if !heartbeatWait(ctx, HeartbeatInterval) {
+				return
+			}
 			continue
 		}
 		counter := value.(*atomic.Int64)
 
-		WorkerHeartbeat := models.WorkerHeartbeat{WorkerId: workerId, InstanceId: instanceId, OccurredAt: time.Now().UTC(), RunningAttempts: int(counter.Load()), Capacity: MaxConcurrency}
+		WorkerHeartbeat := models.WorkerHeartbeat{WorkerId: workerId, InstanceId: instanceId, OccurredAt: time.Now().UTC(), RunningAttempts: int(counter.Load()), Capacity: maxConcurrency()}
 		err := database.DB.WithContext(ctx).Create(&WorkerHeartbeat).Error
 		if err != nil {
 			fmt.Println("FAILED TO WRITE WORKER HEARTBEAT: ", err)
 
 		}
 
-		time.Sleep(HeartbeatInterval)
+		if !heartbeatWait(ctx, HeartbeatInterval) {
+			return
+		}
 	}
 }
+
+// heartbeatWait is how StartHeartbeat waits between beats. It is a variable only so a test can observe and shorten the wait.
+var heartbeatWait = sleepCtx

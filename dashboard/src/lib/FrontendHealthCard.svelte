@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount, onDestroy } from "svelte";
-    import { getTelemetrySnapshot } from "../lib/telemetry";
+    import { getTelemetrySnapshot, formatTelemetrySnapshot } from "../lib/telemetry";
 
     // RFC-009 §23 Frontend Observability -- small version. Pure in-memory
     // counters (see telemetry.ts), reset on page reload, nothing sent to a
@@ -14,6 +14,19 @@
         timer = setInterval(() => { snap = getTelemetrySnapshot(); }, 2000);
     });
     onDestroy(() => clearInterval(timer));
+
+    // RFC-009 §23 (Batch 7): a copyable snapshot. Clipboard access can be refused, so the text is also shown to select by hand.
+    let snapshotText = "";
+    let copyNote = "";
+    async function copySnapshot() {
+        snapshotText = formatTelemetrySnapshot(getTelemetrySnapshot(), new Date().toISOString());
+        try {
+            await navigator.clipboard.writeText(snapshotText);
+            copyNote = "Copied.";
+        } catch {
+            copyNote = "Copy was blocked by the browser -- select the text below.";
+        }
+    }
 
     $: apiRows = Object.keys(snap.api_call_count_by_endpoint)
         .sort()
@@ -55,7 +68,13 @@
     </table>
 {/if}
 
-<p class="note">In-memory only, resets on reload. Endpoints are shown as patterns (e.g. /runs/:id), never as raw ids.</p>
+<p class="note">In-memory only, resets on reload. Endpoints are shown as patterns (e.g. /runs/:id), never as raw ids. Route-load failures are not counted: pages are switched synchronously by the hash router, so there is no asynchronous route load that could fail.</p>
+
+<button class="copy-snapshot" on:click={copySnapshot}>Copy snapshot</button>
+{#if copyNote}<span class="note">{copyNote}</span>{/if}
+{#if snapshotText}
+    <textarea class="snapshot" readonly rows="8" aria-label="Telemetry snapshot">{snapshotText}</textarea>
+{/if}
 
 <style>
     h4 { font-size: 13px; margin: 20px 0 8px; color: #555; }
@@ -68,5 +87,6 @@
     th { background: #f5f5f5; }
     .ep { font-family: monospace; }
     .bad { color: #991b1b; font-weight: bold; }
+    .snapshot { display: block; width: 100%; margin-top: 8px; font-family: monospace; font-size: 11px; }
     .note { font-size: 11px; color: #999; margin-top: 8px; }
 </style>

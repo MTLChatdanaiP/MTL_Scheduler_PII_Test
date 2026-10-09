@@ -15,7 +15,7 @@ type EventEnvelope struct {
 	JobId     string `json:"job_id"`
 	EventID   string `json:"event_id"`
 	EventType string `json:"event_type"`
-	// RFC-000 §5.4 At-Least-Once Is Assumed: "Every cross-context event requires: event_id, producer identity, timestamp, schema version." — schema_version not yet implemented
+	// RFC-000 §5.4 At-Least-Once Is Assumed: "Every cross-context event requires: event_id, producer identity, timestamp, schema version." — all four are populated by LogEvent
 	SchemaVersion string    `json:"schema_version"`
 	OccurredAt    time.Time `json:"occurred_at"`
 	IngestedAt    time.Time `json:"ingested_at"`
@@ -32,9 +32,19 @@ type EventEnvelope struct {
 	AttemptID string `json:"attempt_id,omitempty"`
 	WorkerID  string `json:"worker_id,omitempty"`
 
-	//ScheduleID           string `json:"schedule_id"`
-	//ScheduleOccurrenceID string `json:"schedule_occurrence_id"`
-	//QueueName            string `json:"queue_name"`
-	//TraceID              string `json:"trace_id"`
-	//CorrelationID        string `json:"correlation_id"`
+	// RFC-005 §5 correlation fields. Empty where they do not apply, and on events recorded
+	// before they existed.
+	ScheduleID           string `json:"schedule_id,omitempty"`
+	ScheduleOccurrenceID string `json:"schedule_occurrence_id,omitempty"`
+	QueueName            string `json:"queue_name,omitempty"`
+	TraceID              string `json:"trace_id,omitempty"`
+	CorrelationID        string `json:"correlation_id,omitempty"`
+
+	// RFC-005 §16 Ordering. Wall clocks disagree between processes, so these are kept alongside occurred_at.
+	// ProducerID names one process ("<producer>:<instance>") and ProducerSequence counts the events that process
+	// wrote, which is a TOTAL order within it that a clock step cannot disturb. StreamPosition is the Redis stream
+	// message id of the delivery being handled when the event was written.
+	ProducerID       string `json:"producer_id,omitempty"`
+	ProducerSequence int64  `json:"producer_sequence,omitempty"`
+	StreamPosition   string `json:"stream_position,omitempty"`
 }

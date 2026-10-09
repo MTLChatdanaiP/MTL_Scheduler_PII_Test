@@ -170,7 +170,7 @@ func offsetBugPolicy() models.PIIPolicy {
 func TestApplyFindingsToJSON_RewritesEveryLeaf(t *testing.T) {
 	policy := offsetBugPolicy()
 
-	evaluated, failed, ok := DetectJSON(nestedPayload, policy.Spec.Detectors, policy, "JOB_PAYLOAD", "TEST")
+	evaluated, failed, ok := DetectJSON(nestedPayload, policy.Spec.Detectors, policy, "JOB_PAYLOAD", "TEST", "")
 	if !ok {
 		t.Fatal("DetectJSON reported the payload as non-JSON")
 	}
@@ -227,7 +227,7 @@ func TestApplyFindingsToJSON_ReturnsPayloadUnchangedOnBadInput(t *testing.T) {
 func TestResolveOverlaps_DoesNotCompareAcrossFields(t *testing.T) {
 	policy := offsetBugPolicy()
 
-	evaluated, _, ok := DetectJSON(nestedPayload, policy.Spec.Detectors, policy, "JOB_PAYLOAD", "TEST")
+	evaluated, _, ok := DetectJSON(nestedPayload, policy.Spec.Detectors, policy, "JOB_PAYLOAD", "TEST", "")
 	if !ok {
 		t.Fatal("DetectJSON reported the payload as non-JSON")
 	}

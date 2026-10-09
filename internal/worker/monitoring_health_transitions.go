@@ -76,9 +76,12 @@ func checkMonitoringHealthTransitions(ctx context.Context) error {
 		{"redis-queue-inspection", &models.QueueHealth{}, "sampled_at"},
 	}
 
+	busy := workInFlight(ctx)
+
 	for _, p := range probes {
 		newest, ok := subsystemFreshness(ctx, p.model, p.column)
-		verdict := subsystemVerdict(newest, ok)
+		// RFC-005 §15: no new events on an IDLE system is not a fault (see adjustVerdictForIdle)
+		verdict := adjustVerdictForIdle(p.name, subsystemVerdict(newest, ok), busy)
 
 		subsystemStatusMu.Lock()
 		old, previouslySeen := lastSubsystemStatus[p.name]

@@ -33,17 +33,18 @@ type OverviewResponse struct {
 	OpenAlerts     int64 `json:"open_alerts"`
 	DegradedQueues int64 `json:"degraded_queues"`
 	OfflineWorkers int64 `json:"offline_workers"`
+	// RetryingChains is how many execution chains have a retry run in flight right now (RFC-010 §22 "Retrying chains"): a run created by a
+	// retry (it has a parent) that is Pending, Queued or Running.
+	RetryingChains int64 `json:"retrying_chains"`
 
 	Freshness freshness.FreshnessInfo `json:"freshness"`
 	Live      freshness.LiveInfo      `json:"live"`
 }
 
-const degradedQueuePendingThreshold = 20 // matches QueueHealthCards.svelte's own constant -- keep in sync
-
 func GetOverview(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	var activeRuns, queuedRuns, openAlerts, degradedQueues int64
+	var activeRuns, queuedRuns, openAlerts, degradedQueues, retryingChains int64
 
 	database.DB.WithContext(ctx).Model(&models.Task{}).
 		Where("status = ?", "Running").Count(&activeRuns)
@@ -51,11 +52,15 @@ func GetOverview(c *gin.Context) {
 	database.DB.WithContext(ctx).Model(&models.Task{}).
 		Where("status = ?", "Pending").Count(&queuedRuns)
 
+	database.DB.WithContext(ctx).Model(&models.Task{}).
+		Where("parent_run_id <> '' AND status IN ?", []string{"Pending", "Queued", "Running"}).
+		Distinct("execution_chain_id").Count(&retryingChains)
+
 	database.DB.WithContext(ctx).Model(&models.Alert{}).
 		Where("status = ?", "OPEN").Count(&openAlerts)
 
 	database.DB.WithContext(ctx).Model(&models.QueueHealth{}).
-		Where("pending_count > ?", degradedQueuePendingThreshold).Count(&degradedQueues)
+		Where("pending_count > ?", models.QueueDegradedPendingThreshold).Count(&degradedQueues)
 
 	// Offline workers: reduce to newest-per-WorkerId first, same as
 	// GetWorkers, then count by heartbeat age -- doing this inline rather
@@ -96,6 +101,7 @@ func GetOverview(c *gin.Context) {
 		OpenAlerts:     openAlerts,
 		DegradedQueues: degradedQueues,
 		OfflineWorkers: offlineWorkers,
+		RetryingChains: retryingChains,
 
 		Freshness: freshness.FreshnessFrom(newestEvent.OccurredAt),
 		Live:      freshness.LiveInfo{Watermark: watermark},

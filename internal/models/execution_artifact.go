@@ -39,6 +39,17 @@ type ExecutionArtifact struct {
 	Truncated     bool   `json:"truncated"`
 	OriginalBytes int    `json:"original_bytes"`
 
+	// Withheld is true when the scan could not be trusted (a detector failed, or
+	// the scan itself crashed) and the body was therefore NOT stored. FAIL_OPEN
+	// means "don't block the job", it does not mean "put text we could not fully
+	// check into the monitoring database", so SanitizedBody is empty in this case.
+	Withheld bool `json:"withheld"`
+
+	// BodyExpired is true once the retention sweep has blanked SanitizedBody. The row stays, with its status,
+	// finding count, sizes and policy, so an investigation keeps the facts and loses only the text
+	// (PRD: "avoid retaining entire result bodies unless configured to do so").
+	BodyExpired bool `json:"body_expired"`
+
 	// Scan outcome, mirroring Task.ScanStatus: CLEAN, DETECTED or SCAN_ERROR.
 	// Kept separate from the run's own success/failure, because a scan failing
 	// is not the job failing (RFC-006 §2).

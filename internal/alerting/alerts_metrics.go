@@ -37,6 +37,13 @@ var MetricResolvers = map[string]MetricResolver{
 	"queue.consumer_count": resolveQueueConsumerCount,
 	"monitoring.status":    resolveMonitoringStatus,
 	"pii.policy_action":    resolvePIIPolicyAction,
+
+	// RFC-007 §4: read from monitoring's own event log (event_metrics.go)
+	"run.failed_age":             resolveEventAge("task.failed", "RUN"),
+	"run.retries_exhausted_age":  resolveEventAge("task.retries_exhausted", "RUN"),
+	"run.timed_out_age":          resolveEventAge("task.timed_out", "RUN"),
+	"pii.scan_failed_age":        resolveEventAge("pii.scan_failed", "RUN"),
+	"schedule.creation_lateness": resolveScheduleCreationLateness,
 }
 
 func formatNumeric(v float64) string {
@@ -57,11 +64,26 @@ func resolveWorkerHeartbeatAge(ctx context.Context) ([]MetricSample, error) {
 		return nil, err
 	}
 
+	// RFC-010 §9: an instance that shut down on purpose is not a missing worker, so it must not raise a heartbeat-age alert.
+	// A draining instance (RFC-010 §9) has stopped heartbeating on purpose for at most models.DrainWindow, so it is skipped the same way.
+	var stoppedIDs []string
+	database.DB.WithContext(ctx).Model(&models.Worker{}).
+		Where("stopped_at IS NOT NULL OR (draining_at IS NOT NULL AND draining_at > ?)", time.Now().UTC().Add(-models.DrainWindow)).
+		Pluck("instance_id", &stoppedIDs)
+	stopped := make(map[string]bool, len(stoppedIDs))
+	for _, id := range stoppedIDs {
+		stopped[id] = true
+	}
+
 	seen := make(map[string]bool)
 	samples := make([]MetricSample, 0)
 
 	for _, hb := range heartbeats {
 		if seen[hb.WorkerId] {
+			continue
+		}
+		if stopped[hb.InstanceId] {
+			seen[hb.WorkerId] = true // the newest heartbeat of this worker id belongs to a deliberately stopped instance
 			continue
 		}
 

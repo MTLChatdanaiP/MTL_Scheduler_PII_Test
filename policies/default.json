@@ -1,122 +1,29 @@
 {
   "apiVersion": "monitoring.job/v1alpha1",
   "kind": "PIIPolicy",
-  "metadata": {
-    "name": "default",
-    "version": 1,
-    "checksum": "f7e730406ad42206a45731c4796f219a48af6dfbff491ea6366cd05e8d27b4de"
-  },
+  "metadata": { "name": "default", "version": 1, "checksum": "20cb5e56279d54b507f96c424082d603afcf109c3b9549af9623c9a35f471e2d" },
   "spec": {
     "evaluationMode": "FIRST_MATCH",
-    "defaults": {
-      "action": "OBSERVE",
-      "onScanError": "FAIL_OPEN"
-    },
+    "defaults": { "action": "OBSERVE", "onScanError": "FAIL_OPEN" },
     "detectors": [
-    {
-        "id": "builtin-email",
-        "piiType": "Email",
-        "type": "REGEX",
-        "enabled": true,
-        "pattern": "[^\\s@]+@[^\\s@]+\\.[^\\s@]+",
-        "minimumConfidence": 1.0
-    },
-    {
-        "id": "builtin-phone",
-        "piiType": "Phone",
-        "type": "REGEX",
-        "enabled": true,
-        "pattern": "\\d{3}-\\d{3}-\\d{4}",
-        "minimumConfidence": 1.0
-    },
-    {
-        "id": "builtin-ssn",
-        "piiType": "SSN",
-        "type": "REGEX",
-        "enabled": true,
-        "pattern": "\\d{3}-\\d{2}-\\d{4}",
-        "minimumConfidence": 1.0
-    },
-    {
-        "id": "builtin-creditcard",
-        "piiType": "CreditCard",
-        "type": "REGEX",
-        "enabled": true,
-        "pattern": "\\d{4}-\\d{4}-\\d{4}-\\d{4}",
-        "minimumConfidence": 1.0
-    },
-    {
-        "id": "builtin-ipaddress",
-        "piiType": "IPAddress",
-        "type": "REGEX",
-        "enabled": true,
-        "pattern": "\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b",
-        "minimumConfidence": 1.0
-    }
+      { "id": "builtin-phone", "piiType": "Phone", "type": "REGEX", "enabled": true, "pattern": "\\d{3}-\\d{3}-\\d{4}", "minimumConfidence": 1.0 },
+      { "id": "builtin-ssn", "piiType": "SSN", "type": "REGEX", "enabled": true, "pattern": "\\d{3}-\\d{2}-\\d{4}", "minimumConfidence": 1.0 },
+      { "id": "builtin-email", "piiType": "Email", "type": "REGEX", "enabled": true, "pattern": "[^\\s@]+@[^\\s@]+\\.[^\\s@]+", "minimumConfidence": 1.0 },
+      { "id": "builtin-creditcard", "piiType": "CreditCard", "type": "REGEX", "enabled": true, "pattern": "\\d{4}-\\d{4}-\\d{4}-\\d{4}", "minimumConfidence": 1.0 }
     ],
-      "rules": [
-      {
-        "id": "redact-all-default",
-        "priority": 0,
-        "match": {
-          "sources": ["JOB_PAYLOAD", "TASK_NAME"],
-          "piiTypes": ["Phone", "SSN", "IPAddress"],
-          "detectorIds": ["builtin-phone", "builtin-ssn", "builtin-ipaddress"],
-          "minimumConfidence": 0.0,
-          "queues": ["default"]
-        },
-        "action": {
-          "type": "REDACT"
-        }
-      },
-      {
-        "id": "mask-all-default",
-        "priority": 1,
-        "match": {
-          "sources": ["JOB_PAYLOAD", "TASK_NAME"],
-          "piiTypes": ["CreditCard"],
-          "detectorIds": ["builtin-creditcard"],
-          "jobTypes": ["PAYMENT"],
-          "labels": ["sensitive"]
-        },
-        "action": {
-          "type": "MASK", 
-          "Mask": {"strategy": "FULL", "maskCharacter": "*"}
-        }
-      },
-      {
-        "id": "mask-email-domain",
-        "priority": 2,
-        "match": {
-          "sources": ["JOB_PAYLOAD", "TASK_NAME"],
-          "piiTypes": ["Email"],
-          "detectorIds": ["builtin-email"],
-          "minimumConfidence": 0.0,
-          "labels": ["customer"]
-        },
-        "action": {
-          "type": "MASK",
-          "mask": {
-            "strategy": "EMAIL",
-            "visibleCharacters": 2,
-            "maskCharacter": "*",
-            "domainMode": "MASK"
-          }
-        }
-      },
-      {
-        "id": "redact-nested-phone",
-        "priority": 3,
-        "match": {
-          "fieldPaths": ["customers[*].phone"],
-          "detectorIds": ["builtin-phone"],
-          "queues": ["priority"],
-          "jobTypes": ["CUSTOMER_UPDATE"]
-        },
-        "action": {
-          "type": "REDACT"
-        }
-      }
+    "rules": [
+      { "id": "redact-phone-ssn", "priority": 100,
+        "match": { "sources": ["JOB_PAYLOAD", "JOB_RESULT", "ERROR_MESSAGE", "STRUCTURED_LOG"], "piiTypes": ["Phone", "SSN"] },
+        "action": { "type": "REDACT" } },
+      { "id": "mask-creditcard", "priority": 200,
+        "match": { "sources": ["JOB_PAYLOAD", "JOB_RESULT", "ERROR_MESSAGE", "STRUCTURED_LOG"], "piiTypes": ["CreditCard"] },
+        "action": { "type": "MASK", "mask": { "strategy": "FULL", "maskCharacter": "*" } } },
+      { "id": "mask-email", "priority": 300,
+        "match": { "sources": ["JOB_PAYLOAD", "JOB_RESULT", "ERROR_MESSAGE", "STRUCTURED_LOG"], "piiTypes": ["Email"] },
+        "action": { "type": "MASK", "mask": { "strategy": "EMAIL", "visibleCharacters": 2, "maskCharacter": "*", "domainMode": "PRESERVE" } } },
+      { "id": "redact-pii-in-metadata", "priority": 400,
+        "match": { "sources": ["JOB_METADATA"] },
+        "action": { "type": "REDACT" } }
     ]
   }
 }

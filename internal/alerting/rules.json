@@ -1,7 +1,7 @@
 {
   "apiVersion": "monitoring.job/v1alpha1",
   "kind": "AlertRules",
-  "metadata": { "name": "default", "version": 1, "checksum": "77d181c5dd099b414e013623c50391edb8b8e48d6e75f5a1fdf7f9a7e1e18e64" },
+  "metadata": { "name": "default", "version": 1, "checksum": "7b9de728731ffd89bd1ef8c6ad09d1afeea4fe30cb534067b9bdc560f8afea4b" },
   "spec": {
     "rules": [
       {
@@ -103,6 +103,102 @@
         "alertType": "PII_POLICY_VIOLATED",
         "severity": "CRITICAL",
         "scope": { "type": "PII_CATEGORY", "values": ["SSN", "CreditCard"] }
+      },
+      {
+        "id": "run-failed-default",
+        "enabled": true,
+        "priority": 0,
+        "source": "METRIC",
+        "metric": "run.failed_age",
+        "operator": "LTE",
+        "threshold": 900,
+        "alertType": "RUN_FAILED",
+        "severity": "WARNING",
+        "scope": { "type": "GLOBAL" }
+      },
+      {
+        "id": "run-retry-exhausted-default",
+        "enabled": true,
+        "priority": 0,
+        "source": "METRIC",
+        "metric": "run.retries_exhausted_age",
+        "operator": "LTE",
+        "threshold": 900,
+        "alertType": "RUN_RETRY_EXHAUSTED",
+        "severity": "CRITICAL",
+        "scope": { "type": "GLOBAL" }
+      },
+      {
+        "id": "run-timeout-default",
+        "enabled": true,
+        "priority": 0,
+        "source": "METRIC",
+        "metric": "run.timed_out_age",
+        "operator": "LTE",
+        "threshold": 900,
+        "alertType": "RUN_TIMEOUT",
+        "severity": "WARNING",
+        "scope": { "type": "GLOBAL" }
+      },
+      {
+        "id": "pii-scan-failed-default",
+        "enabled": true,
+        "priority": 0,
+        "source": "METRIC",
+        "metric": "pii.scan_failed_age",
+        "operator": "LTE",
+        "threshold": 900,
+        "alertType": "PII_SCAN_FAILED",
+        "severity": "WARNING",
+        "scope": { "type": "GLOBAL" }
+      },
+      {
+        "id": "schedule-delayed-default",
+        "enabled": true,
+        "priority": 0,
+        "source": "METRIC",
+        "metric": "schedule.creation_lateness",
+        "operator": "GT",
+        "threshold": 30,
+        "alertType": "SCHEDULE_DELAYED",
+        "severity": "WARNING",
+        "scope": { "type": "GLOBAL" }
+      },
+      {
+        "id": "monitoring-gap-default",
+        "enabled": true,
+        "priority": 0,
+        "source": "METRIC",
+        "metric": "monitoring.status",
+        "operator": "NEQ",
+        "textValue": "COMPLETE",
+        "alertType": "MONITORING_GAP",
+        "severity": "WARNING",
+        "scope": { "type": "GLOBAL" }
+      },
+      {
+        "id": "worker-capacity-high-default",
+        "enabled": false,
+        "priority": 0,
+        "source": "METRIC",
+        "metric": "worker.capacity_used",
+        "operator": "GT",
+        "threshold": 90,
+        "alertType": "WORKER_CAPACITY_HIGH",
+        "severity": "WARNING",
+        "scope": { "type": "GLOBAL" }
+      },
+      {
+        "id": "pii-detected-default",
+        "enabled": false,
+        "priority": 0,
+        "source": "METRIC",
+        "metric": "pii.policy_action",
+        "operator": "NEQ",
+        "textValue": "BLOCK",
+        "alertType": "PII_DETECTED",
+        "severity": "INFO",
+        "scope": { "type": "GLOBAL" }
       }
     ]
   }

@@ -82,12 +82,15 @@ func TestSummaryFor_DoesNotDoubleTranslate(t *testing.T) {
 // happens to run first.
 func validRule() models.AlertRule {
 	return models.AlertRule{
-		ID:        "valid-rule",
-		Enabled:   true,
-		Source:    "ANNOTATION",
-		AlertType: "RUN_STUCK",
-		Severity:  "CRITICAL",
-		Scope:     models.RuleScope{Type: "GLOBAL"},
+		ID:      "valid-rule",
+		Enabled: true,
+		Source:  "ANNOTATION",
+		// An annotation rule with no type can never match an annotation, so ValidateRules now rejects
+		// it; the fixture used to omit this and was accepted only because nothing checked.
+		AnnotationType: "RUN_STUCK",
+		AlertType:      "RUN_STUCK",
+		Severity:       "CRITICAL",
+		Scope:          models.RuleScope{Type: "GLOBAL"},
 	}
 }
 

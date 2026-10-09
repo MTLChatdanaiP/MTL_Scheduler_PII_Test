@@ -15,6 +15,7 @@ type DryRunRequest struct {
 	Policy  models.PIIPolicy // let the caller pass a CANDIDATE policy, not just the live one
 	Source  string           // e.g. "JOB_PAYLOAD" — let the caller simulate this
 	JobType string           // e.g. "dummy" — let the caller simulate a specific task type
+	Queue   string           // e.g. "tasks:stream" — let the caller simulate a specific queue
 }
 
 func PostDryRun(c *gin.Context) {
@@ -31,12 +32,12 @@ func PostDryRun(c *gin.Context) {
 		req.Source = "JOB_PAYLOAD"
 	}
 
-	results := pii.DryRun(req.Payload, req.Policy, req.Source, req.JobType)
+	results := pii.DryRun(req.Payload, req.Policy, req.Source, req.JobType, req.Queue)
 
 	// RFC-006 §32: a dry run is how an operator checks a candidate policy before activating it.
-	// A detector that fails to compile or run means the candidate did not validate.
+	// A detector that fails to compile or run, or a bad action/mask setting, means the candidate did not validate.
 	eventType := "pii.policy_validated"
-	if len(results.FailedDetectors) > 0 {
+	if len(results.FailedDetectors) > 0 || len(results.PolicyProblems) > 0 {
 		eventType = "pii.policy_validation_failed"
 	}
 	events.LogEvent(c.Request.Context(), "system", eventType, "api")
